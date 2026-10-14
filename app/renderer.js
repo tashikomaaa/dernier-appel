@@ -346,10 +346,62 @@ $('#btn-monter').addEventListener('click', async () => {
   }
 })
 
-$('#btn-ecouter').addEventListener('click', async () => {
+// ───────────────────────────── lecteur ──────────────────────────────────────
+
+// Un vrai lecteur dans la fenêtre plutôt qu'un processus détaché sans interface :
+// on veut pouvoir se déplacer dans la prise, revenir sur un passage, comparer le
+// brut et le monté. Les chemins sont relatifs à app/, donc la page reste dans
+// son origine et la politique de sécurité n'a pas à être élargie.
+const audio = $('#l-audio')
+const mmss = (s) => (isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00')
+
+function ouvrirLecteur(cheminRelatif, nom) {
+  $('#lecteur').hidden = false
+  $('#l-nom').textContent = nom
+  audio.src = '../' + cheminRelatif
+  audio.load()
+  audio.play().catch(() => {})
+}
+
+$('#l-jouer').addEventListener('click', () => {
+  if (!audio.src) return
+  audio.paused ? audio.play().catch(() => {}) : audio.pause()
+})
+audio.addEventListener('play', () => { $('#l-jouer').textContent = '❚❚' })
+audio.addEventListener('pause', () => { $('#l-jouer').textContent = '▶' })
+audio.addEventListener('ended', () => { $('#l-jouer').textContent = '▶' })
+audio.addEventListener('loadedmetadata', () => { $('#l-duree').textContent = mmss(audio.duration) })
+audio.addEventListener('timeupdate', () => {
+  if (glissement) return
+  $('#l-actuel').textContent = mmss(audio.currentTime)
+  if (audio.duration) $('#l-barre').value = Math.round(1000 * audio.currentTime / audio.duration)
+})
+audio.addEventListener('error', () => {
+  journal('montage').textContent += `✗ lecture impossible : ${audio.src}\n`
+})
+
+let glissement = false
+$('#l-barre').addEventListener('input', () => {
+  glissement = true
+  if (audio.duration) $('#l-actuel').textContent = mmss(audio.duration * $('#l-barre').value / 1000)
+})
+$('#l-barre').addEventListener('change', () => {
+  if (audio.duration) audio.currentTime = audio.duration * $('#l-barre').value / 1000
+  glissement = false
+})
+$('#l-volume').addEventListener('input', () => { audio.volume = $('#l-volume').value / 100 })
+
+$('#btn-ecouter').addEventListener('click', () => {
   const f = $('#btn-ecouter').dataset.fichier
-  const r = await window.studio.jouer(`${INV.racine}/${f}`)
-  if (r.erreur) journal('montage').textContent += '✗ ' + r.erreur + '\n'
+  if (f) ouvrirLecteur(f, f.split('/').pop())
+})
+
+$('#btn-ecouter-prise').addEventListener('click', () => {
+  const p = $('#m-prise').value
+  if (!p) { journal('montage').textContent += '✗ aucune prise sélectionnée\n'; return }
+  // Le sélecteur porte un chemin absolu ; on le ramène dans le projet.
+  const rel = INV && p.startsWith(INV.racine) ? p.slice(INV.racine.length + 1) : p
+  ouvrirLecteur(rel, rel.split('/').pop())
 })
 
 // ───────────────────────────── publication ───────────────────────────────────

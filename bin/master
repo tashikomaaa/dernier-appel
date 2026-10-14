@@ -6,7 +6,7 @@ set -euo pipefail
 
 SORTIE=""; TITRE=""; EPISODE=""; DATE_PUB="$(date +%F)"; DESCRIPTION=""
 POCHETTE=""; INTRO=""; OUTRO=""
-LUFS="-16"; TP="-1.5"; BRUIT="12"; COUPE_SILENCES=""; FONDU="2"
+LUFS="-16"; TP="-1.5"; BRUIT="12"; COUPE_GRAVE="90"; COUPE_SILENCES=""; FONDU="2"
 SEUIL_SILENCE=""; PAUSE="0.6"
 AMBIANCE=""; AMBIANCE_ECART="28"; MUSIQUE=""; MUSIQUE_ECART="20"; DUCK="5"
 CANAUX=1; GARDE_WAV=0; VERBEUX=0
@@ -32,6 +32,7 @@ master [options] prise1.wav [prise2.wav ...]
       --fondu S         durée des fondus en secondes (défaut: 2)
       --lufs N          cible de loudness (défaut: -16)
       --bruit N         force du débruitage, 0 = désactivé (défaut: 12)
+      --coupe-grave N   fréquence de coupure du grave en Hz (défaut: 90)
       --coupe-silences  raccourcit les pauses longues (relectures, hésitations)
       --pause S         longueur de pause conservée, en s (défaut: 0.6)
       --seuil-silence N seuil de détection en dB (défaut: plancher de bruit + 10)
@@ -59,6 +60,7 @@ while [ $# -gt 0 ]; do
     --fondu) FONDU="$2"; shift 2 ;;
     --lufs) LUFS="$2"; shift 2 ;;
     --bruit) BRUIT="$2"; shift 2 ;;
+    --coupe-grave) COUPE_GRAVE="$2"; shift 2 ;;
     --coupe-silences) COUPE_SILENCES=1; shift ;;
     --pause) PAUSE="$2"; shift 2 ;;
     --seuil-silence) SEUIL_SILENCE="$2"; shift 2 ;;
@@ -149,7 +151,11 @@ echo "        brut : $(mmss "$BRUT_S")"
 echo "── 2/5  réparation et nivellement de la voix"
 
 # 2a — réparation : grondements, clics de bouche, souffle
-REPARE="highpass=f=80,adeclick"
+# Deux passe-haut en cascade plutôt qu'un seul : 24 dB par octave au lieu de
+# 12. Le bruit de structure — vibrations du bureau, ventilateur, pas dans la
+# pièce — vit sous 80 Hz, là où une pente douce en laisse passer beaucoup.
+# La voix masculine la plus grave descend à 85 Hz : couper à 90 ne l'entame pas.
+REPARE="highpass=f=${COUPE_GRAVE}:poles=2,highpass=f=${COUPE_GRAVE}:poles=2,adeclick"
 [ "$BRUIT" != "0" ] && REPARE="$REPARE,afftdn=nr=${BRUIT}:nf=-28:tn=1"
 run -i "$TMP/voix.wav" -af "$REPARE" -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/repare.wav"
 

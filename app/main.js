@@ -199,19 +199,6 @@ ipcMain.handle('outil', (evt, nom, args) => new Promise((resolve) => {
   proc.on('close', (code) => resolve(code ?? 1))
 }))
 
-ipcMain.handle('jouer', (_e, fichier) => {
-  const candidats = [
-    ['ffplay', ['-nodisp', '-autoexit', '-loglevel', 'quiet', fichier]],
-    ['mpv', ['--no-video', '--really-quiet', fichier]],
-    ['pw-play', [fichier]],
-  ]
-  for (const [cmd, args] of candidats) {
-    try { spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref(); return { ok: cmd } }
-    catch {}
-  }
-  return { erreur: 'aucun lecteur audio (ffplay, mpv ou pw-play)' }
-})
-
 ipcMain.handle('confirmer', async (_e, { titre, corps, bouton }) => {
   const r = await dialog.showMessageBox(fenetre, {
     type: 'warning', buttons: ['Annuler', bouton], defaultId: 0, cancelId: 0,

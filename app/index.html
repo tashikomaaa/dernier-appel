@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; media-src 'self'">
 <title>Studio — Dernier Appel</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -93,7 +93,19 @@
         </div>
         <div class="actions">
           <button class="primaire" id="btn-monter">Monter</button>
-          <button id="btn-ecouter" disabled>Écouter</button>
+          <button id="btn-ecouter-prise">Écouter la prise</button>
+          <button id="btn-ecouter" disabled>Écouter le montage</button>
+        </div>
+
+        <div class="lecteur" id="lecteur" hidden>
+          <button class="rond" id="l-jouer" title="Lecture / pause">▶</button>
+          <span class="l-nom" id="l-nom"></span>
+          <span class="l-temps" id="l-actuel">0:00</span>
+          <input type="range" id="l-barre" min="0" max="1000" value="0" step="1">
+          <span class="l-temps" id="l-duree">0:00</span>
+          <span class="l-vol-icone">♪</span>
+          <input type="range" id="l-volume" min="0" max="100" value="100" title="Volume">
+          <audio id="l-audio" preload="metadata"></audio>
         </div>
         <pre class="journal" id="journal-montage"></pre>
       </div>

@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld('studio', {
   recMarquer: () => ipcRenderer.invoke('rec:marquer'),
   recArreter: () => ipcRenderer.invoke('rec:arreter'),
   outil: (nom, args) => ipcRenderer.invoke('outil', nom, args),
-  jouer: (f) => ipcRenderer.invoke('jouer', f),
   confirmer: (o) => ipcRenderer.invoke('confirmer', o),
   surSortie: (cb) => ipcRenderer.on('outil:ligne', (_e, l) => cb(l)),
 })
