@@ -1,0 +1,18 @@
+# Métadonnées de l'épisode, lues par « bin/flux » pour construire le flux RSS.
+
+[episode]
+numero = 0
+saison = 1
+titre  = "REMPLIR"               # le nom propre qu'on taperait dans une recherche
+resume = """
+REMPLIR — deux ou trois paragraphes. Séparés par une ligne vide, ils devien-
+dront des paragraphes HTML dans le flux. Les sources citées ont leur place ici.
+"""
+date    = 2026-01-01             # date de publication souhaitée
+fichier = "000-remplir.mp3"      # nom du fichier dans sorties/
+type    = "full"                 # full | trailer | bonus
+
+# guid = "..."
+# Laissé vide, il est calculé une fois et reste stable. Ne le change JAMAIS
+# après publication : pour les plateformes, un GUID différent est un nouvel
+# épisode, et l'ancien disparaît des abonnements.

@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""pochette — fabrique la pochette de l'émission, et vérifie qu'elle tient à 55 px.
+
+La pochette est vue deux fois : en grand sur la page de l'émission, et à
+55 pixels de côté dans une liste d'écoute. C'est la deuxième qui décide si on
+clique. Le script produit donc toujours les deux, pour que la décision se
+prenne sur la bonne.
+
+    bin/pochette -t "L'Arrière-Salle"
+    bin/pochette -t "Dernier Appel" -s "histoires étranges" --variante neon
+"""
+import argparse
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parent.parent
+COTE = 3000
+POLICES = {"noire": "Noto Serif Black, Noto Serif, serif",
+           "display": "Noto Serif Display, Noto Serif Black, serif"}
+
+# Trois ambiances, toutes dans le registre noir : fond presque noir, une seule
+# source de lumière chaude, un accent froid en rappel.
+VARIANTES = {
+    "tungstene": dict(fond="#0A0A0C", fond2="#141118", lueur="#E8A33D",
+                      accent="#C8822A", texte="#F0E9DB"),
+    "neon":      dict(fond="#07090D", fond2="#0E1620", lueur="#D98A2B",
+                      accent="#4FD1E0", texte="#EDF2F2"),
+    "sang":      dict(fond="#0B0809", fond2="#1A0F12", lueur="#D9752B",
+                      accent="#A33341", texte="#F2E8E2"),
+}
+
+
+def decouper(titre: str, large: float, taille_max: float, ratio=0.56):
+    """Choisit une taille de police et une répartition en lignes telles que la
+    plus longue ligne remplisse la largeur disponible. Un titre de pochette doit
+    être énorme : c'est la seule chose lisible à 55 px."""
+    # On coupe aussi sur les traits d'union : « L'ARRIÈRE-SALLE » sur une seule
+    # ligne donne des lettres minuscules à 55 px, alors qu'en deux lignes elles
+    # doublent de taille.
+    mots = []
+    for brut in titre.split():
+        morceaux = brut.split("-")
+        mots += [m + "-" if i < len(morceaux) - 1 else m
+                 for i, m in enumerate(morceaux) if m]
+    meilleur = None
+    for n in range(1, min(4, len(mots)) + 1):
+        # répartition la plus équilibrée possible sur n lignes
+        lignes, reste = [], mots[:]
+        par_ligne = -(-len(mots) // n)
+        while reste:
+            lignes.append(" ".join(reste[:par_ligne]))
+            reste = reste[par_ligne:]
+        if len(lignes) > n:
+            continue
+        plus_longue = max(len(l) for l in lignes)
+        taille = min(taille_max / len(lignes), large / (plus_longue * ratio))
+        if meilleur is None or taille > meilleur[0]:
+            meilleur = (taille, lignes)
+    return meilleur
+
+
+def svg(titre, sous_titre, v, police):
+    marge = COTE * 0.10
+    large = COTE - 2 * marge
+    taille, lignes = decouper(titre.upper(), large, COTE * 0.46)
+    inter = taille * 1.0
+    # Bloc de titre centré sur le tiers supérieur, pour dégager le bas.
+    haut = COTE * 0.235 - (len(lignes) - 1) * inter / 2 + taille * 0.34
+
+    textes = "".join(
+        f'<text x="{COTE/2:.0f}" y="{haut + i*inter:.0f}" text-anchor="middle" '
+        f'font-family="{police}" font-weight="900" '
+        f'font-size="{taille:.0f}" letter-spacing="{taille*0.005:.1f}" '
+        f'fill="{v["texte"]}">{l}</text>'
+        for i, l in enumerate(lignes))
+
+    # Filet puis sous-titre, juste sous le bloc de titre : plus de collision
+    # possible avec le verre, qui vit dans le tiers inférieur.
+    bas_titre = haut + (len(lignes) - 1) * inter + taille * 0.42
+    filet_y = bas_titre + COTE * 0.045
+    sous = (f'<rect x="{COTE*0.40:.0f}" y="{filet_y:.0f}" width="{COTE*0.20:.0f}" '
+            f'height="{COTE*0.0026:.0f}" fill="{v["accent"]}" fill-opacity="0.85"/>')
+    if sous_titre:
+        sous += (f'<text x="{COTE/2:.0f}" y="{filet_y + COTE*0.055:.0f}" text-anchor="middle" '
+                 f'font-family="Noto Sans, sans-serif" font-weight="500" '
+                 f'font-size="{COTE*0.027:.0f}" letter-spacing="{COTE*0.009:.0f}" '
+                 f'fill="{v["accent"]}" fill-opacity="0.92">{sous_titre.upper()}</text>')
+
+    # Le verre : une silhouette éclairée par la tranche, pas une forme pleine.
+    # À 55 px il ne reste que le contour lumineux et le reflet sur le zinc —
+    # c'est exactement ce qu'on veut qu'il reste.
+    comptoir = COTE * 0.862
+    cx, hv, lv = COTE / 2, COTE * 0.150, COTE * 0.072
+    verre = (
+        f'<path d="M {cx-lv:.0f} {comptoir-hv:.0f} L {cx-lv*0.66:.0f} {comptoir:.0f} '
+        f'L {cx+lv*0.66:.0f} {comptoir:.0f} L {cx+lv:.0f} {comptoir-hv:.0f} Z" '
+        f'fill="url(#liquide)" stroke="{v["lueur"]}" stroke-opacity="0.75" '
+        f'stroke-width="{COTE*0.0030:.0f}" stroke-linejoin="round"/>'
+        f'<ellipse cx="{cx:.0f}" cy="{comptoir-hv:.0f}" rx="{lv:.0f}" ry="{lv*0.16:.0f}" '
+        f'fill="none" stroke="{v["lueur"]}" stroke-opacity="0.85" stroke-width="{COTE*0.0028:.0f}"/>'
+        f'<ellipse cx="{cx:.0f}" cy="{comptoir-hv*0.34:.0f}" rx="{lv*0.80:.0f}" ry="{lv*0.13:.0f}" '
+        f'fill="{v["lueur"]}" fill-opacity="0.28"/>'
+        f'<ellipse cx="{cx:.0f}" cy="{comptoir + COTE*0.012:.0f}" rx="{lv*1.5:.0f}" '
+        f'ry="{COTE*0.013:.0f}" fill="{v["lueur"]}" fill-opacity="0.16"/>')
+
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{COTE}" height="{COTE}" viewBox="0 0 {COTE} {COTE}">
+<defs>
+  <linearGradient id="fond" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="{v['fond']}"/><stop offset="100%" stop-color="{v['fond2']}"/>
+  </linearGradient>
+  <radialGradient id="lampe" cx="50%" cy="78%" r="52%">
+    <stop offset="0%" stop-color="{v['lueur']}" stop-opacity="0.42"/>
+    <stop offset="45%" stop-color="{v['lueur']}" stop-opacity="0.11"/>
+    <stop offset="100%" stop-color="{v['lueur']}" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="liquide" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="{v['lueur']}" stop-opacity="0.34"/>
+    <stop offset="100%" stop-color="{v['accent']}" stop-opacity="0.06"/>
+  </linearGradient>
+  <radialGradient id="vignette" cx="50%" cy="50%" r="72%">
+    <stop offset="55%" stop-color="#000" stop-opacity="0"/>
+    <stop offset="100%" stop-color="#000" stop-opacity="0.72"/>
+  </radialGradient>
+</defs>
+<rect width="{COTE}" height="{COTE}" fill="url(#fond)"/>
+<rect width="{COTE}" height="{COTE}" fill="url(#lampe)"/>
+{verre}
+<rect x="0" y="{COTE*0.862:.0f}" width="{COTE}" height="{COTE*0.0035:.0f}" fill="{v['lueur']}" fill-opacity="0.38"/>
+{textes}
+{sous}
+<rect width="{COTE}" height="{COTE}" fill="url(#vignette)"/>
+</svg>'''
+
+
+def main():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("-t", "--titre", required=True)
+    p.add_argument("-s", "--sous-titre", default="")
+    p.add_argument("-o", "--sortie", default=None)
+    p.add_argument("--variante", choices=sorted(VARIANTES), default="tungstene")
+    # Un didone est plus élégant en grand, mais ses déliés disparaissent à 55 px.
+    # Par défaut on privilégie donc ce qui survit à la vignette.
+    p.add_argument("--police", choices=["noire", "display"], default="noire")
+    p.add_argument("--taille", type=int, default=3000)
+    p.add_argument("-h", "--help", action="help")
+    a = p.parse_args()
+    if not 1400 <= a.taille <= 3000:
+        sys.exit("erreur : Apple exige entre 1400 et 3000 px de côté.")
+
+    sortie = Path(a.sortie) if a.sortie else RACINE / "assets" / "pochette.jpg"
+    sortie.parent.mkdir(parents=True, exist_ok=True)
+    apercu = sortie.with_name(sortie.stem + "-55px.png")
+
+    with tempfile.TemporaryDirectory() as d:
+        s = Path(d) / "p.svg"
+        s.write_text(svg(a.titre, a.sous_titre, VARIANTES[a.variante],
+                 POLICES[a.police]), encoding="utf-8")
+        png = Path(d) / "p.png"
+        subprocess.run(["rsvg-convert", "-w", str(a.taille), "-h", str(a.taille),
+                        "-o", str(png), str(s)], check=True)
+        subprocess.run(["magick", str(png), "-quality", "88", "-strip",
+                        "-interlace", "none", str(sortie)], check=True)
+        # L'aperçu est agrandi au plus proche voisin : on voit exactement ce que
+        # montre une liste d'écoute, sans lissage qui flatterait le résultat.
+        subprocess.run(["magick", str(png), "-resize", "55x55", "-filter", "point",
+                        "-resize", "440x440", str(apercu)], check=True)
+
+    poids = sortie.stat().st_size / 1000
+    print(f"✓ {sortie}  ({a.taille}×{a.taille}, {poids:.0f} ko)")
+    print(f"✓ {apercu}  ← la vraie taille dans une liste, agrandie 8×")
+    if poids > 500:
+        print("  ⚠ au-delà de 500 ko : recompresse, la pochette est rechargée souvent")
+    if a.taille < 1400:
+        print("  ⚠ sous le minimum Apple")
+
+
+if __name__ == "__main__":
+    main()

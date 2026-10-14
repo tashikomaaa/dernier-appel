@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""publier — assemble le site et le flux pour GitHub Pages.
+
+Fabrique docs/ : la page d'accueil, le flux, la pochette, les MP3 et une page
+par épisode portant la transcription. Les pages d'épisode ne sont pas
+décoratives : un moteur de recherche ne lit pas ton audio, il lit ce texte.
+C'est le seul levier de découverte gratuit et durable.
+
+    bin/publier              prépare docs/ et affiche les commandes git
+    bin/publier --pousser    prépare, puis commite et pousse
+"""
+import html
+import shutil
+import subprocess
+import sys
+import tomllib
+from datetime import datetime
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parent.parent
+DOCS = RACINE / "docs"
+
+
+def lire_emission():
+    chemin = RACINE / "emission.toml"
+    if not chemin.exists():
+        sys.exit("erreur : emission.toml manquant.")
+    with chemin.open("rb") as f:
+        e = tomllib.load(f).get("emission", {})
+    if "REMPLIR" in str(e):
+        sys.exit("erreur : emission.toml contient encore des champs « REMPLIR ».")
+    return e
+
+
+def lire_episodes():
+    eps = []
+    for conf in sorted((RACINE / "episodes").glob("*/episode.toml")):
+        if conf.parent.name.startswith("_"):
+            continue
+        with conf.open("rb") as f:
+            ep = tomllib.load(f).get("episode", {})
+        ep["dossier"] = conf.parent
+        eps.append(ep)
+    return sorted(eps, key=lambda x: x.get("date"), reverse=True)
+
+
+# Les noms de mois sont écrits en dur plutôt que tirés de la locale : « %B »
+# suit la locale du système, qui rend « October » sur une machine en C.
+MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+        "août", "septembre", "octobre", "novembre", "décembre"]
+
+
+def date_fr(d):
+    return f"{d.day} {MOIS[d.month - 1]} {d.year}"
+
+
+def esc(t):
+    return html.escape(str(t))
+
+
+def paras(texte):
+    return "".join(f"<p>{esc(b.strip())}</p>"
+                   for b in str(texte).split("\n\n") if b.strip())
+
+
+STYLE = """
+:root{--fond:#0A0A0C;--fond2:#141118;--ambre:#E8A33D;--cuivre:#C8822A;
+--texte:#F0E9DB;--gris:#9B948A}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(#0A0A0C,#141118 60%,#0A0A0C);
+color:var(--texte);font:16px/1.65 Georgia,'Noto Serif',serif;
+min-height:100vh;padding:0 16px}
+.enveloppe{max-width:720px;margin:0 auto;padding:56px 0 80px}
+header{text-align:center;margin-bottom:56px}
+.pochette{width:220px;height:220px;border-radius:4px;
+box-shadow:0 18px 50px rgba(0,0,0,.65);display:block;margin:0 auto 28px}
+h1{font-size:2.5rem;letter-spacing:.02em;margin:0 0 10px;text-transform:uppercase}
+.sstitre{color:var(--cuivre);letter-spacing:.3em;text-transform:uppercase;
+font-size:.72rem;font-family:system-ui,sans-serif;margin:0 0 24px}
+.chapeau{color:var(--gris);max-width:52ch;margin:0 auto}
+.liens{margin-top:28px;font-family:system-ui,sans-serif;font-size:.85rem}
+.liens a{color:var(--ambre);text-decoration:none;border-bottom:1px solid #E8A33D40;
+margin:0 10px;display:inline-block;padding:4px 0}
+.liens a:hover{border-bottom-color:var(--ambre)}
+article{border-top:1px solid #FFFFFF14;padding:34px 0}
+article h2{font-size:1.4rem;margin:0 0 6px}
+article h2 a{color:var(--texte);text-decoration:none}
+article h2 a:hover{color:var(--ambre)}
+.meta{color:var(--gris);font-size:.78rem;font-family:system-ui,sans-serif;
+letter-spacing:.08em;text-transform:uppercase;margin:0 0 16px}
+audio{width:100%;margin:14px 0 4px}
+.retour{display:inline-block;margin-bottom:28px;color:var(--cuivre);
+text-decoration:none;font-family:system-ui,sans-serif;font-size:.85rem}
+.transcription{border-top:1px solid #FFFFFF14;margin-top:40px;padding-top:28px}
+.transcription h3{color:var(--cuivre);font-size:.75rem;letter-spacing:.2em;
+text-transform:uppercase;font-family:system-ui,sans-serif}
+footer{border-top:1px solid #FFFFFF14;margin-top:48px;padding-top:24px;
+color:var(--gris);font-size:.8rem;font-family:system-ui,sans-serif;text-align:center}
+@media(max-width:520px){h1{font-size:1.9rem}.pochette{width:170px;height:170px}}
+"""
+
+
+def page(e, titre, corps, racine="."):
+    return f"""<!DOCTYPE html>
+<html lang="{esc(e.get('langue', 'fr'))}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{esc(titre)}</title>
+<meta name="description" content="{esc(e.get('sous_titre', ''))}">
+<link rel="alternate" type="application/rss+xml" title="{esc(e['titre'])}" href="{esc(e['flux'])}">
+<style>{STYLE}</style>
+</head>
+<body><div class="enveloppe">{corps}
+<footer>{esc(e.get('copyright', ''))} · <a href="{esc(e['flux'])}" style="color:var(--cuivre)">flux RSS</a></footer>
+</div></body></html>
+"""
+
+
+def slug(ep):
+    return Path(str(ep["fichier"])).stem
+
+
+def main():
+    pousser = "--pousser" in sys.argv
+    e = lire_emission()
+
+    r = subprocess.run([str(RACINE / "bin" / "flux")], capture_output=True, text=True)
+    sys.stderr.write(r.stderr)
+    if r.returncode != 0:
+        sys.exit("flux non valide : rien n'a été publié.")
+    print("── flux régénéré")
+
+    eps = lire_episodes()
+    DOCS.mkdir(exist_ok=True)
+    (DOCS / "audio").mkdir(exist_ok=True)
+    (DOCS / "episodes").mkdir(exist_ok=True)
+    (DOCS / ".nojekyll").write_text("")
+
+    shutil.copy2(RACINE / "sorties" / "flux.xml", DOCS / "flux.xml")
+    pochette = RACINE / str(e.get("pochette_locale", "assets/pochette.jpg"))
+    shutil.copy2(pochette, DOCS / "pochette.jpg")
+
+    poids = 0
+    for ep in eps:
+        src = RACINE / "sorties" / str(ep["fichier"])
+        dst = DOCS / "audio" / str(ep["fichier"])
+        if not dst.exists() or dst.stat().st_mtime < src.stat().st_mtime:
+            shutil.copy2(src, dst)
+        poids += dst.stat().st_size
+
+    # Page d'accueil
+    articles = []
+    for ep in eps:
+        s = slug(ep)
+        articles.append(f"""<article>
+<h2><a href="episodes/{s}.html">{esc(ep['titre'])}</a></h2>
+<p class="meta">{date_fr(ep['date'])} · épisode {int(ep['numero'])}</p>
+{paras(ep['resume'])}
+<audio controls preload="none" src="audio/{esc(ep['fichier'])}"></audio>
+</article>""")
+    accueil = f"""<header>
+<img class="pochette" src="pochette.jpg" alt="{esc(e['titre'])}">
+<h1>{esc(e['titre'])}</h1>
+<p class="sstitre">{esc(e.get('sous_titre', ''))}</p>
+<div class="chapeau">{paras(e['description'])}</div>
+<p class="liens"><a href="flux.xml">S'abonner par RSS</a></p>
+</header>
+{''.join(articles) or '<article><p class="meta">Premier épisode bientôt.</p></article>'}"""
+    (DOCS / "index.html").write_text(page(e, e["titre"], accueil), encoding="utf-8")
+
+    # Une page par épisode, avec la transcription si elle existe
+    avec_texte = 0
+    for ep in eps:
+        s = slug(ep)
+        txt = RACINE / "sorties" / f"{s}.txt"
+        trans = ""
+        if txt.exists():
+            avec_texte += 1
+            trans = ('<div class="transcription"><h3>Transcription</h3>'
+                     + paras(txt.read_text(encoding="utf-8")) + "</div>")
+        corps = f"""<a class="retour" href="../index.html">← {esc(e['titre'])}</a>
+<h1 style="font-size:1.9rem;text-align:left">{esc(ep['titre'])}</h1>
+<p class="meta">{date_fr(ep['date'])} · épisode {int(ep['numero'])}</p>
+<audio controls preload="none" src="../audio/{esc(ep['fichier'])}"></audio>
+{paras(ep['resume'])}{trans}"""
+        (DOCS / "episodes" / f"{s}.html").write_text(
+            page(e, f"{ep['titre']} — {e['titre']}", corps, ".."), encoding="utf-8")
+
+    print(f"── site assemblé : {len(eps)} épisode(s), {poids/1e6:.1f} Mo d'audio")
+    if eps and avec_texte < len(eps):
+        print(f"  ⚠ {len(eps) - avec_texte} épisode(s) sans transcription dans docs/ — "
+              "lance bin/transcrire, c'est ce que lisent les moteurs de recherche")
+    if poids > 900e6:
+        print("  ⚠ au-delà de 900 Mo : GitHub conseille de rester sous 1 Go par dépôt")
+
+    print(f"\n  flux      {e['flux']}")
+    print(f"  site      {e['site']}")
+    print(f"  pochette  {e['pochette']}")
+
+    if pousser:
+        for c in (["git", "add", "docs"],
+                  ["git", "commit", "-m", f"publication du {datetime.now():%Y-%m-%d}"],
+                  ["git", "push"]):
+            r = subprocess.run(c, cwd=RACINE)
+            if r.returncode != 0:
+                sys.exit(f"\n✗ « {' '.join(c)} » a échoué : rien n'a été poussé.")
+        print("\n✓ poussé. GitHub Pages met une à deux minutes à servir la nouvelle version.")
+    else:
+        print("\n  docs/ est prêt. Pour publier :")
+        print("    git add docs && git commit -m 'nouvel épisode' && git push")
+        print("  ou directement :  bin/publier --pousser")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# transcrire — texte et sous-titres depuis l'audio fini.
+# Sert à trois choses : la description de l'épisode, les sous-titres YouTube,
+# et des pages indexables par les moteurs de recherche (le seul levier de
+# découverte sérieux pour un podcast).
+set -euo pipefail
+[ $# -eq 0 ] && { echo "usage: transcrire fichier.mp3 [modele]" >&2; exit 2; }
+AUDIO="$1"; MODELE="${2:-medium}"
+[ -f "$AUDIO" ] || { echo "erreur : $AUDIO introuvable." >&2; exit 1; }
+SORTIE="$(dirname "$AUDIO")"
+
+if command -v whisper >/dev/null; then
+  exec whisper "$AUDIO" --language French --model "$MODELE" \
+       --output_format all --output_dir "$SORTIE"
+elif command -v whisper-cli >/dev/null; then
+  wav="$(mktemp --suffix=.wav)"; trap 'rm -f "$wav"' EXIT
+  ffmpeg -y -v error -i "$AUDIO" -ar 16000 -ac 1 "$wav"
+  exec whisper-cli -m "${WHISPER_MODELE:-$HOME/.local/share/whisper/ggml-$MODELE.bin}" \
+       -l fr -osrt -otxt -of "$SORTIE/$(basename "${AUDIO%.*}")" "$wav"
+elif python3 -c 'import faster_whisper' 2>/dev/null; then
+  exec python3 - "$AUDIO" "$MODELE" "$SORTIE" <<'PY'
+import sys, pathlib
+from faster_whisper import WhisperModel
+audio, modele, sortie = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3])
+m = WhisperModel(modele, device="cpu", compute_type="int8")
+segs, info = m.transcribe(audio, language="fr", vad_filter=True)
+base = sortie / pathlib.Path(audio).stem
+def ts(t):
+    h, r = divmod(t, 3600); mn, s = divmod(r, 60)
+    return f"{int(h):02d}:{int(mn):02d}:{s:06.3f}".replace(".", ",")
+with open(f"{base}.srt", "w") as srt, open(f"{base}.txt", "w") as txt:
+    for i, s in enumerate(segs, 1):
+        srt.write(f"{i}\n{ts(s.start)} --> {ts(s.end)}\n{s.text.strip()}\n\n")
+        txt.write(s.text.strip() + " ")
+print(f"✓ {base}.srt\n✓ {base}.txt")
+PY
+else
+  cat >&2 <<'AIDE'
+Aucun moteur de transcription installé. Au choix :
+
+  yay -S whisper.cpp          # léger, rapide sur processeur, recommandé ici
+  pipx install openai-whisper # plus simple, plus lourd (PyTorch)
+  pipx install faster-whisper # bon compromis
+
+Pour whisper.cpp, télécharge aussi un modèle :
+  mkdir -p ~/.local/share/whisper
+  curl -L -o ~/.local/share/whisper/ggml-medium.bin \
+    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
+AIDE
+  exit 1
+fi

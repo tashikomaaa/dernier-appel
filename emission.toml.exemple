@@ -1,0 +1,46 @@
+# Fiche d'identité de « Dernier Appel ». Tout ce qui est publié dans le flux RSS
+# et sur le site vient d'ici.
+#
+# Tout est renseigné. Les outils vérifient le reste avant chaque publication.
+
+[emission]
+titre       = "Dernier Appel"
+sous_titre  = "histoires étranges"
+description = """
+Des histoires vraies qu'on raconte à voix basse, au comptoir, quand la salle
+s'est vidée. Espionnage, disparitions, objets dans le ciel, affaires qu'on n'a
+jamais refermées.
+
+Un épisode toutes les deux semaines, seize minutes. On y distingue ce qui est
+établi, ce qui est débattu, et ce qui n'est qu'une légende — et on dit lequel
+est lequel.
+"""
+
+# Le nom sous lequel tu signes. Change-le si tu préfères un autre nom de plume.
+auteur       = "Corvus"
+proprietaire = "Corvus"
+
+# Adresse PUBLIQUE dans le flux. Apple, Spotify, Deezer et iHeart y envoient
+# leur code de vérification : elle doit être relevée, sinon aucune plateforme
+# ne peut valider l'émission.
+courriel = "dernier_appel@aldwin.fr"
+
+langue    = "fr"
+explicite = false
+type      = "episodic"
+copyright = "© 2026 Dernier Appel"
+
+# Pseudo GitHub vérifié le 14 octobre 2026 avec « gh auth status ».
+# Si tu nommes le dépôt autrement que « dernier-appel », change-le ici aussi.
+site       = "https://tashikomaaa.github.io/dernier-appel/"
+flux       = "https://tashikomaaa.github.io/dernier-appel/flux.xml"
+base_media = "https://tashikomaaa.github.io/dernier-appel/audio"
+pochette   = "https://tashikomaaa.github.io/dernier-appel/pochette.jpg"
+
+pochette_locale = "assets/pochette.jpg"
+
+categories = ["History", "Society & Culture > Documentary", "True Crime"]
+verrou = true
+
+heure_publication = "06:00"
+fuseau            = "Europe/Paris"

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Studio</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <nav class="rail">
+    <div class="marque"><b id="nom-emission">Studio</b><small id="sous-emission">atelier</small></div>
+    <button class="etape" data-vue="episode"><i>1</i><span>Épisode</span></button>
+    <button class="etape" data-vue="micro"><i>2</i><span>Micro</span></button>
+    <button class="etape" data-vue="prise"><i>3</i><span>Prise</span></button>
+    <button class="etape" data-vue="montage"><i>4</i><span>Montage</span></button>
+    <button class="etape" data-vue="publication"><i>5</i><span>Publication</span></button>
+    <div class="courant" id="courant">aucun épisode choisi</div>
+  </nav>
+
+  <main>
+    <!-- 1 ─ épisode -->
+    <section class="vue" id="vue-episode">
+      <header><h1>Épisode</h1><p>Choisis celui sur lequel tu travailles.</p></header>
+      <div class="corps">
+        <div id="liste-episodes" class="cartes"></div>
+        <form id="nouvel-episode" class="encart">
+          <h3>Nouvel épisode</h3>
+          <p class="aide">Copie le gabarit de <code>episodes/_modele/</code>.</p>
+          <div class="ligne">
+            <input id="ne-numero" type="number" min="0" max="999" placeholder="n°" required>
+            <input id="ne-sujet" type="text" placeholder="sujet en quelques mots" required>
+            <button class="primaire" type="submit">Créer</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- 2 ─ micro -->
+    <section class="vue" id="vue-micro">
+      <header><h1>Micro</h1><p>Six secondes de parole, et on sait si la prise sera
+        récupérable. À faire avant de lire deux mille mots.</p></header>
+      <div class="corps">
+        <div class="encart ligne-micro">
+          <label for="source">Entrée</label>
+          <select id="source"></select>
+          <button id="btn-sources" title="Relire la liste des entrées">Rafraîchir</button>
+          <button class="primaire" id="btn-test">Tester 6 s</button>
+        </div>
+        <pre class="journal" id="journal-micro"></pre>
+      </div>
+    </section>
+
+    <!-- 3 ─ prise -->
+    <section class="vue sans-marge" id="vue-prise">
+      <div class="scene">
+        <div id="ruban"></div>
+        <div class="voile-haut"></div>
+        <div class="voile-bas"></div>
+        <div class="guide"></div>
+      </div>
+      <div class="barre">
+        <span class="pastille" id="pastille"></span>
+        <span id="etat-prise">Prêt</span>
+        <span class="chrono" id="chrono">0:00</span>
+        <div class="progres"><div id="avance"></div></div>
+        <span class="info"><b id="mpm">150</b> mots/min</span>
+        <span class="info touches">
+          <kbd>espace</kbd> défiler <kbd>↑↓</kbd> vitesse <kbd>M</kbd> reprise
+          <kbd>1</kbd>–<kbd>9</kbd> section <kbd>Échap</kbd> arrêter
+        </span>
+        <button class="primaire" id="btn-prise">Démarrer la prise</button>
+        <button class="danger" id="btn-stop" disabled>Arrêter</button>
+      </div>
+    </section>
+
+    <!-- 4 ─ montage -->
+    <section class="vue" id="vue-montage">
+      <header><h1>Montage</h1><p>Le niveau des fonds est donné en écart sous ta voix,
+        pas en décibels absolus : le réglage ne bouge plus d'un épisode à l'autre.</p></header>
+      <div class="corps">
+        <div class="encart grille">
+          <label for="m-prise">Prise</label><select id="m-prise"></select>
+          <label for="m-ambiance">Fond de salle</label><input id="m-ambiance" type="text">
+          <label for="m-amb-ecart">dB sous la voix</label><input id="m-amb-ecart" type="number" value="28" min="8" max="40">
+          <label for="m-musique">Musique</label><input id="m-musique" type="text">
+          <label for="m-mus-ecart">dB sous la voix</label><input id="m-mus-ecart" type="number" value="20" min="8" max="40">
+          <label for="m-duck">Creux sous la parole (dB)</label><input id="m-duck" type="number" value="5" min="0" max="8">
+          <label for="m-coupe">Resserrer les pauses</label><input id="m-coupe" type="checkbox" checked>
+          <label for="m-stereo">Sortie stéréo</label><input id="m-stereo" type="checkbox" checked>
+        </div>
+        <div class="actions">
+          <button class="primaire" id="btn-monter">Monter</button>
+          <button id="btn-ecouter" disabled>Écouter</button>
+        </div>
+        <pre class="journal" id="journal-montage"></pre>
+      </div>
+    </section>
+
+    <!-- 5 ─ publication -->
+    <section class="vue" id="vue-publication">
+      <header><h1>Publication</h1><p>Dans cet ordre. Rien ne part en ligne sans que
+        tu le demandes explicitement.</p></header>
+      <div class="corps">
+        <div class="alerte" id="alerte" hidden></div>
+        <div class="etapes-pub">
+          <button data-pub="texte"><b>Transcription</b><span>extraite du script, sans rien installer</span></button>
+          <button data-pub="flux"><b>Vérifier le flux</b><span>ce que les annuaires refuseraient sans explication</span></button>
+          <button data-pub="site"><b>Assembler le site</b><span>accueil, flux, pochette, MP3, pages d'épisode</span></button>
+          <button data-pub="pousser" class="danger"><b>Mettre en ligne</b><span>commite et pousse vers GitHub Pages</span></button>
+        </div>
+        <pre class="journal" id="journal-publication"></pre>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="renderer.js"></script>
+</body>
+</html>

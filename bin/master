@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+# master — post-production complète pour « les arcanes de l'histoire ».
+# Prend une ou plusieurs prises brutes, rend un MP3 publiable.
+# Remplace le montage : on ne corrige pas à la main, on applique une chaîne fixe.
+set -euo pipefail
+
+SORTIE=""; TITRE=""; EPISODE=""; DATE_PUB="$(date +%F)"; DESCRIPTION=""
+POCHETTE=""; INTRO=""; OUTRO=""
+LUFS="-16"; TP="-1.5"; BRUIT="12"; COUPE_SILENCES=""; FONDU="2"
+SEUIL_SILENCE=""; PAUSE="0.6"
+AMBIANCE=""; AMBIANCE_ECART="28"; MUSIQUE=""; MUSIQUE_ECART="20"; DUCK="5"
+CANAUX=1; GARDE_WAV=0; VERBEUX=0
+PRISES=()
+
+usage() {
+  cat <<'USAGE'
+master [options] prise1.wav [prise2.wav ...]
+
+  -o, --sortie F        fichier MP3 de sortie (défaut: sorties/<titre>.mp3)
+  -t, --titre "..."     titre de l'épisode (tag ID3)
+  -e, --episode N       numéro d'épisode (tag track)
+  -d, --date AAAA-MM-JJ date de publication (défaut: aujourd'hui)
+      --description "." résumé (tag comment)
+  -p, --pochette F      image JPG/PNG intégrée
+      --ambiance F      fond de salle sous toute la narration (voir bin/ambiance)
+      --ambiance-ecart N  dB sous la voix (défaut: 28)
+      --musique F         fond musical sous toute la narration
+      --musique-ecart N   dB sous la voix (défaut: 20)
+      --duck N          creux du fond quand tu parles, en dB ; 0 = aucun (défaut: 5)
+      --intro F         générique d'ouverture, enchaîné en fondu
+      --outro F         générique de fin, enchaîné en fondu
+      --fondu S         durée des fondus en secondes (défaut: 2)
+      --lufs N          cible de loudness (défaut: -16)
+      --bruit N         force du débruitage, 0 = désactivé (défaut: 12)
+      --coupe-silences  raccourcit les pauses longues (relectures, hésitations)
+      --pause S         longueur de pause conservée, en s (défaut: 0.6)
+      --seuil-silence N seuil de détection en dB (défaut: plancher de bruit + 10)
+      --stereo          sortie stéréo (défaut: mono, adapté à une voix seule)
+      --wav             conserve aussi le master WAV non compressé
+  -v, --verbeux         affiche les commandes ffmpeg
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o|--sortie) SORTIE="$2"; shift 2 ;;
+    -t|--titre) TITRE="$2"; shift 2 ;;
+    -e|--episode) EPISODE="$2"; shift 2 ;;
+    -d|--date) DATE_PUB="$2"; shift 2 ;;
+    --description) DESCRIPTION="$2"; shift 2 ;;
+    -p|--pochette) POCHETTE="$2"; shift 2 ;;
+    --ambiance) AMBIANCE="$2"; shift 2 ;;
+    --ambiance-ecart) AMBIANCE_ECART="$2"; shift 2 ;;
+    --musique) MUSIQUE="$2"; shift 2 ;;
+    --musique-ecart) MUSIQUE_ECART="$2"; shift 2 ;;
+    --duck) DUCK="$2"; shift 2 ;;
+    --intro) INTRO="$2"; shift 2 ;;
+    --outro) OUTRO="$2"; shift 2 ;;
+    --fondu) FONDU="$2"; shift 2 ;;
+    --lufs) LUFS="$2"; shift 2 ;;
+    --bruit) BRUIT="$2"; shift 2 ;;
+    --coupe-silences) COUPE_SILENCES=1; shift ;;
+    --pause) PAUSE="$2"; shift 2 ;;
+    --seuil-silence) SEUIL_SILENCE="$2"; shift 2 ;;
+    --stereo) CANAUX=2; shift ;;
+    --wav) GARDE_WAV=1; shift ;;
+    -v|--verbeux) VERBEUX=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "option inconnue : $1" >&2; usage >&2; exit 2 ;;
+    *) PRISES+=("$1"); shift ;;
+  esac
+done
+
+[ "${#PRISES[@]}" -eq 0 ] && { echo "erreur : aucune prise fournie." >&2; usage >&2; exit 2; }
+for p in "${PRISES[@]}"; do
+  [ -f "$p" ] || { echo "erreur : prise introuvable : $p" >&2; exit 1; }
+done
+for f in "$INTRO" "$OUTRO" "$POCHETTE" "$AMBIANCE" "$MUSIQUE"; do
+  [ -n "$f" ] && [ ! -f "$f" ] && { echo "erreur : fichier introuvable : $f" >&2; exit 1; }
+done
+
+RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -z "$SORTIE" ]; then
+  base="${TITRE:-$(basename "${PRISES[0]}" | sed 's/\.[^.]*$//')}"
+  base="$(echo "$base" | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || echo "$base")"
+  base="$(echo "$base" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//')"
+  [ -n "$EPISODE" ] && base="$(printf '%03d' "$EPISODE")-$base"
+  mkdir -p "$RACINE/sorties"
+  SORTIE="$RACINE/sorties/$base.mp3"
+fi
+mkdir -p "$(dirname "$SORTIE")"
+
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/arcanes-master.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+FF=(ffmpeg -y -hide_banner)
+[ "$VERBEUX" -eq 1 ] && trace() { echo "+ ffmpeg $*" >&2; } || trace() { :; }
+run() { trace "$@"; "${FF[@]}" -v error "$@"; }
+
+lufs() {
+  ffmpeg -hide_banner -nostats -i "$1" -af ebur128=framelog=quiet -f null - 2>&1 \
+    | grep -A5 'Summary' | grep -m1 'I:' | sed 's/.*I: *//; s/LUFS//' | tr -d ' '
+}
+duree_exacte() { ffprobe -v error -show_entries format=duration -of csv=p=0 "$1"; }
+duree_de() { ffprobe -v error -show_entries format=duration -of csv=p=0 "$1" | cut -d. -f1; }
+mmss() { printf '%d min %02d s' $(( $1 / 60 )) $(( $1 % 60 )); }
+
+echo "── 1/5  assemblage des prises (${#PRISES[@]})"
+if [ "${#PRISES[@]}" -gt 1 ]; then
+  args=(); maps=""
+  for i in "${!PRISES[@]}"; do args+=(-i "${PRISES[$i]}"); maps+="[$i:a]"; done
+  run "${args[@]}" -filter_complex "${maps}concat=n=${#PRISES[@]}:v=0:a=1[o]" \
+      -map "[o]" -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/voix.wav"
+else
+  run -i "${PRISES[0]}" -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/voix.wav"
+fi
+BRUT_S="$(duree_de "$TMP/voix.wav")"
+echo "        brut : $(mmss "$BRUT_S")"
+
+# Chaîne voix, en trois temps. L'ordre compte : la coupe des pauses doit passer
+# AVANT le nivellement. speechnorm remonte les passages faibles vers le haut,
+# y compris le bruit de fond des silences — après lui, plus aucune pause n'est
+# détectable. Le débruitage, lui, doit passer avant la coupe, pour abaisser le
+# plancher et rendre les pauses franches.
+echo "── 2/5  réparation et nivellement de la voix"
+
+# 2a — réparation : grondements, clics de bouche, souffle
+REPARE="highpass=f=80,adeclick"
+[ "$BRUIT" != "0" ] && REPARE="$REPARE,afftdn=nr=${BRUIT}:nf=-28:tn=1"
+run -i "$TMP/voix.wav" -af "$REPARE" -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/repare.wav"
+
+plancher() {
+  ffmpeg -hide_banner -nostats -i "$1" -af astats=metadata=1 -f null - 2>&1 \
+    | grep -m1 'Noise floor dB' | sed 's/.*: *//' | tr -d ' '
+}
+PL_BRUT="$(plancher "$TMP/voix.wav")"; PL_NET="$(plancher "$TMP/repare.wav")"
+printf '        plancher de bruit : %s dB → %s dB après réparation\n' \
+  "${PL_BRUT%%.*}" "${PL_NET%%.*}"
+if [ "${PL_BRUT%%.*}" -gt -42 ] 2>/dev/null; then
+  echo "        ⚠ fond sonore élevé. Rapproche-toi du micro et traite la pièce :"
+  echo "          le débruitage masque le souffle, il ne rend pas la voix meilleure."
+fi
+
+# 2b — coupe des pauses. Le bon seuil dépend de la pièce et du micro, donc on ne
+#      le devine pas : on applique le filtre à plusieurs seuils, du plus prudent
+#      au plus agressif, et on garde le premier qui enlève vraiment du temps sans
+#      mordre sur la parole. Garde-fou : jamais plus de 35 % du brut.
+COURANT="$TMP/repare.wav"
+if [ -n "$COUPE_SILENCES" ]; then
+  REF="$(duree_exacte "$TMP/repare.wav")"
+  RETENU=""; OTE=""; PART=""
+  for seuil in ${SEUIL_SILENCE:- -48 -45 -42 -39 -36 -33 -30}; do
+    run -i "$TMP/repare.wav" \
+        -af "silenceremove=stop_periods=-1:stop_duration=${PAUSE}:stop_threshold=${seuil}dB:detection=rms" \
+        -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/coupe.wav"
+    APRES="$(duree_exacte "$TMP/coupe.wav")"
+    read -r ote part <<<"$(awk -v a="$REF" -v b="$APRES" \
+      'BEGIN{o=a-b; printf "%.2f %d", o, (a>0)?100*o/a:0}')"
+    [ "$(awk -v o="$ote" 'BEGIN{print (o>0.5)?1:0}')" = 0 ] && continue
+    if [ "$part" -gt 35 ] && [ -z "$SEUIL_SILENCE" ]; then
+      echo "        à ${seuil} dB la coupe mordrait sur la parole (${part} %) : étape passée"
+      break
+    fi
+    RETENU="$seuil"; OTE="$ote"; PART="$part"; break
+  done
+  if [ -n "$RETENU" ]; then
+    COURANT="$TMP/coupe.wav"   # déjà écrit au seuil retenu
+    echo "        pauses resserrées à ${RETENU} dB : −${OTE} s (${PART} % du brut)"
+  elif [ -z "$PART" ]; then
+    echo "        aucune pause franche à couper : étape passée"
+  fi
+fi
+
+# 2c — nivellement : égalisation, puis mise à niveau, puis densité, puis garde-fou
+NIVEAU="equalizer=f=250:t=q:w=1.2:g=-2,equalizer=f=3200:t=q:w=1.5:g=2"
+NIVEAU="$NIVEAU,speechnorm=e=12.5:r=0.0001:l=1"
+NIVEAU="$NIVEAU,acompressor=threshold=-18dB:ratio=3:attack=15:release=250"
+NIVEAU="$NIVEAU,alimiter=limit=0.95"
+run -i "$COURANT" -af "$NIVEAU" -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/voix_traitee.wav"
+
+echo "── 3/5  habillage"
+PROG="$TMP/voix_traitee.wav"
+
+# Le fond de salle et la musique sont posés AVANT les génériques, sous la seule
+# narration. Leur niveau n'est pas donné en dB absolus mais en écart sous la
+# voix : mesuré à chaque fois, il ne dépend donc ni du fichier de fond ni de la
+# prise. Un fond réglé une fois reste au même endroit d'un épisode à l'autre.
+if [ -n "$AMBIANCE" ] || [ -n "$MUSIQUE" ]; then
+  LAYOUT=$([ "$CANAUX" = 1 ] && echo mono || echo stereo)
+  DUREE_VOIX="$(duree_exacte "$TMP/voix_traitee.wav")"
+  LV="$(lufs "$TMP/voix_traitee.wav")"
+  echo "        voix mesurée à ${LV} LUFS"
+
+  couche() {   # $1=fichier  $2=écart en dB  $3=cible  → affiche le gain appliqué
+    local lb gain
+    lb="$(lufs "$1")"
+    gain="$(awk -v v="$LV" -v e="$2" -v b="$lb" 'BEGIN{printf "%.2f", (v-e)-b}')"
+    run -stream_loop -1 -i "$1" -t "$DUREE_VOIX" \
+        -af "volume=${gain}dB,aformat=sample_rates=48000:channel_layouts=$LAYOUT" \
+        -ar 48000 -ac "$CANAUX" -c:a pcm_f32le "$3"
+    echo "$gain"
+  }
+
+  COUCHES=()
+  if [ -n "$AMBIANCE" ]; then
+    g="$(couche "$AMBIANCE" "$AMBIANCE_ECART" "$TMP/fond_amb.wav")"
+    COUCHES+=("$TMP/fond_amb.wav")
+    echo "        ambiance : $(basename "$AMBIANCE"), ${AMBIANCE_ECART} dB sous la voix (gain ${g} dB)"
+  fi
+  if [ -n "$MUSIQUE" ]; then
+    g="$(couche "$MUSIQUE" "$MUSIQUE_ECART" "$TMP/fond_mus.wav")"
+    COUCHES+=("$TMP/fond_mus.wav")
+    echo "        musique  : $(basename "$MUSIQUE"), ${MUSIQUE_ECART} dB sous la voix (gain ${g} dB)"
+  fi
+
+  if [ "${#COUCHES[@]}" -gt 1 ]; then
+    run -i "${COUCHES[0]}" -i "${COUCHES[1]}" \
+        -filter_complex "[0:a][1:a]amix=inputs=2:normalize=0:duration=first[o]" \
+        -map "[o]" -ar 48000 -ac "$CANAUX" -c:a pcm_f32le "$TMP/fond.wav"
+  else
+    cp "${COUCHES[0]}" "$TMP/fond.wav"
+  fi
+
+  # Fondus aux deux bouts, pour que la salle s'ouvre et se referme.
+  FONDU_FOND="$(awk -v d="$DUREE_VOIX" 'BEGIN{printf "%.2f", (d>8)?2:d/4}')"
+  SORTIE_FOND="$(awk -v d="$DUREE_VOIX" -v f="$FONDU_FOND" 'BEGIN{printf "%.2f", d-f}')"
+  CHAINE_FOND="afade=t=in:st=0:d=$FONDU_FOND:curve=qsin,afade=t=out:st=$SORTIE_FOND:d=$FONDU_FOND:curve=qsin"
+
+  if [ "$(awk -v d="$DUCK" 'BEGIN{print (d>0)?1:0}')" = 1 ]; then
+    # Le fond s'efface sous la parole. Le seuil est posé 8 dB sous le niveau
+    # mesuré de la voix : le dépassement moyen vaut donc 8 dB, ce qui donne
+    # directement le taux à appliquer pour obtenir le creux demandé.
+    SEUIL_LIN="$(awk -v v="$LV" 'BEGIN{printf "%.6f", 10^((v-8)/20)}')"
+    TAUX="$(awk -v d="$DUCK" 'BEGIN{r=1/(1-((d<7.5)?d:7.5)/8); if(r<1.1)r=1.1; if(r>20)r=20; printf "%.2f", r}')"
+    run -i "$TMP/fond.wav" -i "$TMP/voix_traitee.wav" \
+        -filter_complex "[0:a]${CHAINE_FOND}[f];[f][1:a]sidechaincompress=threshold=${SEUIL_LIN}:ratio=${TAUX}:attack=20:release=350:detection=rms[o]" \
+        -map "[o]" -ar 48000 -ac "$CANAUX" -c:a pcm_f32le "$TMP/fond_duck.wav"
+    CREUX="$(awk -v a="$(lufs "$TMP/fond.wav")" -v b="$(lufs "$TMP/fond_duck.wav")" 'BEGIN{printf "%.1f", a-b}')"
+    echo "        ducking  : taux ${TAUX}, creux de ${CREUX} dB en moyenne sur l'épisode"
+    FOND_FINAL="$TMP/fond_duck.wav"
+  else
+    run -i "$TMP/fond.wav" -af "$CHAINE_FOND" -ar 48000 -ac "$CANAUX" \
+        -c:a pcm_f32le "$TMP/fond_plat.wav"
+    echo "        ducking  : désactivé"
+    FOND_FINAL="$TMP/fond_plat.wav"
+  fi
+
+  run -i "$TMP/voix_traitee.wav" -i "$FOND_FINAL" \
+      -filter_complex "[0:a][1:a]amix=inputs=2:normalize=0:duration=first[o]" \
+      -map "[o]" -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/corps.wav"
+  PROG="$TMP/corps.wav"
+fi
+if [ -n "$INTRO" ] || [ -n "$OUTRO" ]; then
+  # On rembourre la voix de silence pour que le fondu mange le silence,
+  # pas les premiers et derniers mots.
+  run -i "$PROG" \
+      -af "adelay=$((FONDU*1000))|$((FONDU*1000)),apad=pad_dur=$FONDU" \
+      -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/voix_pad.wav"
+  COURANT="$TMP/voix_pad.wav"
+  if [ -n "$INTRO" ]; then
+    run -i "$INTRO" -i "$COURANT" \
+        -filter_complex "[0:a]aformat=sample_rates=48000:channel_layouts=$([ "$CANAUX" = 1 ] && echo mono || echo stereo)[a];[a][1:a]acrossfade=d=$FONDU:c1=tri:c2=tri[o]" \
+        -map "[o]" -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/avec_intro.wav"
+    COURANT="$TMP/avec_intro.wav"
+    echo "        intro enchaînée en fondu de ${FONDU}s"
+  fi
+  if [ -n "$OUTRO" ]; then
+    run -i "$COURANT" -i "$OUTRO" \
+        -filter_complex "[1:a]aformat=sample_rates=48000:channel_layouts=$([ "$CANAUX" = 1 ] && echo mono || echo stereo)[b];[0:a][b]acrossfade=d=$FONDU:c1=tri:c2=tri[o]" \
+        -map "[o]" -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/avec_outro.wav"
+    COURANT="$TMP/avec_outro.wav"
+    echo "        outro enchaînée en fondu de ${FONDU}s"
+  fi
+  PROG="$COURANT"
+else
+  echo "        pas de générique (--intro / --outro pour en ajouter)"
+fi
+
+echo "── 4/5  normalisation du programme à $LUFS LUFS (deux passes)"
+MESURE="$(ffmpeg -hide_banner -nostats -i "$PROG" \
+          -af "loudnorm=I=$LUFS:TP=$TP:LRA=11:print_format=json" -f null - 2>&1 \
+          | sed -n '/^{/,/^}/p')"
+val() { echo "$MESURE" | grep -m1 "\"$1\"" | sed 's/.*: *"\?\([^",]*\)"\?.*/\1/'; }
+IN_I="$(val input_i)"; IN_TP="$(val input_tp)"; IN_LRA="$(val input_lra)"
+IN_TH="$(val input_thresh)"; OFFSET="$(val target_offset)"
+if [ -z "$IN_I" ] || [ "$IN_I" = "-inf" ]; then
+  echo "erreur : impossible de mesurer le loudness (prise vide ou silencieuse ?)" >&2
+  exit 1
+fi
+echo "        mesuré : ${IN_I} LUFS, crête vraie ${IN_TP} dBTP, plage ${IN_LRA} LU"
+run -i "$PROG" -af "loudnorm=I=$LUFS:TP=$TP:LRA=11:measured_I=$IN_I:measured_TP=$IN_TP:measured_LRA=$IN_LRA:measured_thresh=$IN_TH:offset=$OFFSET:linear=true" \
+    -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/master.wav"
+
+echo "── 5/5  encodage MP3"
+DEBIT=$([ "$CANAUX" = 1 ] && echo 96k || echo 128k)
+meta=(-metadata "artist=les arcanes de l'histoire" -metadata "album=les arcanes de l'histoire"
+      -metadata "genre=History" -metadata "date=$DATE_PUB")
+[ -n "$TITRE" ] && meta+=(-metadata "title=$TITRE")
+[ -n "$EPISODE" ] && meta+=(-metadata "track=$EPISODE")
+[ -n "$DESCRIPTION" ] && meta+=(-metadata "comment=$DESCRIPTION")
+if [ -n "$POCHETTE" ]; then
+  run -i "$TMP/master.wav" -i "$POCHETTE" -map 0:a -map 1:v -c:v copy \
+      -disposition:v attached_pic -metadata:s:v title="Pochette" \
+      -c:a libmp3lame -b:a "$DEBIT" -ar 44100 -ac "$CANAUX" -id3v2_version 3 \
+      "${meta[@]}" "$SORTIE"
+else
+  run -i "$TMP/master.wav" -c:a libmp3lame -b:a "$DEBIT" -ar 44100 -ac "$CANAUX" \
+      -id3v2_version 3 "${meta[@]}" "$SORTIE"
+fi
+[ "$GARDE_WAV" -eq 1 ] && cp "$TMP/master.wav" "${SORTIE%.mp3}.wav"
+
+FINAL="$(ffmpeg -hide_banner -nostats -i "$SORTIE" -af ebur128=framelog=quiet -f null - 2>&1 \
+         | grep -A4 'Summary' | grep -m1 'I:' | sed 's/.*I: *//')"
+echo
+echo "✓ $SORTIE"
+echo "  durée      $(mmss "$(duree_de "$SORTIE")")"
+echo "  loudness   ${FINAL:-n/d} (cible $LUFS LUFS)"
+echo "  poids      $(du -h "$SORTIE" | cut -f1)"
+[ "$GARDE_WAV" -eq 1 ] && echo "  master wav ${SORTIE%.mp3}.wav"
+
+# Sans cette ligne, le dernier test conditionnel fixerait le code de sortie à 1
+# alors que tout a réussi, et casserait tout appel en chaîne.
+exit 0

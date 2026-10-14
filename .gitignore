@@ -1,0 +1,21 @@
+# Audio brut : volumineux, et sans intérêt hors de la machine qui monte.
+prises/
+sorties/
+
+# Le fond de bar se régénère à l'identique avec sa graine, inutile de le
+# versionner :  bin/ambiance -d 2:00 --graine 1848 --rumeur 50 --densite 12
+assets/*.wav
+
+# docs/ n'est PAS ignoré, et ne doit pas l'être : c'est le site que GitHub Pages
+# publie. Un motif *.mp3 global exclurait docs/audio/ sans rien dire.
+
+# résidus de l'interpréteur Python
+__pycache__/
+
+# Travail éditorial en cours : scripts et briefs de recherche restent sur la
+# machine. Le dépôt est public, et un sujet non publié n'a rien à y faire.
+# Les gabarits de episodes/_modele/, eux, sont de la documentation.
+episodes/*/script.md
+episodes/*/brief.md
+!episodes/_modele/script.md
+!episodes/_modele/brief.md

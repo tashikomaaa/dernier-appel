@@ -1,0 +1,22 @@
+[episode]
+numero = 0
+saison = 1
+titre  = "Bande-annonce"
+resume = """
+Des histoires vraies qu'on raconte à voix basse, au comptoir, quand la salle
+s'est vidée. Espionnage, disparitions, objets dans le ciel, affaires qu'on n'a
+jamais refermées.
+
+À chaque fois, trois choses séparées et nommées comme telles : ce qui est
+établi, ce qui est débattu, et ce qui n'est qu'une légende. Quand les sources
+s'arrêtent, on le dit.
+
+Seize minutes, un jeudi sur deux.
+
+Music: Signs To Nowhere by Shane Ivers - https://www.silvermansound.com
+"""
+# Mets ici le jour où tu publies vraiment. Une date future masque l'épisode sur
+# la plupart des plateformes — et un flux sans épisode visible est refusé partout.
+date    = 2026-10-14
+fichier = "000-bande-annonce.mp3"
+type    = "trailer"

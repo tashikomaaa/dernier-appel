@@ -1,0 +1,8 @@
+{
+  "name": "studio-dernier-appel",
+  "version": "1.0.0",
+  "description": "Atelier de production du podcast Dernier Appel",
+  "main": "main.js",
+  "license": "UNLICENSED",
+  "private": true
+}

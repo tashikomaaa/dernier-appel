@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# duree — estime le temps de lecture d'un script, pour viser une durée cible
+# avant d'allumer le micro plutôt qu'après.
+set -euo pipefail
+MPM="${ARCANES_MPM:-150}"   # mots par minute, narration posée en français
+[ $# -eq 0 ] && { echo "usage: duree [--mpm N] script.md [script2.md ...]" >&2; exit 2; }
+[ "${1:-}" = "--mpm" ] && { MPM="$2"; shift 2; }
+total=0
+for f in "$@"; do
+  # on ne compte pas ce qui ne sera pas lu : titres, notes entre crochets,
+  # commentaires HTML, blocs de sources en citation
+  n=$(sed -e 's/<!--.*-->//g' -e '/^#/d' -e '/^>/d' -e 's/\[[^]]*\]//g' "$f" \
+      | tr -s '[:space:]' '\n' | grep -c '[[:alnum:]]' || true)
+  s=$(( n * 60 / MPM ))
+  printf '%-40s %5d mots   %d min %02d s\n' "$(basename "$f")" "$n" $((s/60)) $((s%60))
+  total=$(( total + s ))
+done
+[ $# -gt 1 ] && printf '%-40s %18s\n' "TOTAL" "$((total/60)) min $((total%60)) s"
+printf '\n(base : %s mots/minute — ajuste avec ARCANES_MPM après ta première prise)\n' "$MPM"

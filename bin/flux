@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""flux — génère le flux RSS du podcast depuis emission.toml et les épisodes.
+
+Posséder son flux est la condition pour exister partout : chaque annuaire
+(Apple, Spotify, Deezer, Amazon, Podcast Index…) s'abonne à la même URL. Si le
+flux appartient à un hébergeur, en changer fait perdre tous les abonnés —
+personne ne se réabonne.
+
+Usage :
+    bin/flux                 génère sorties/flux.xml
+    bin/flux --verifier      vérifie seulement, n'écrit rien
+"""
+import html
+import subprocess
+import sys
+import tomllib
+import uuid
+from datetime import datetime, time
+from email.utils import format_datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+RACINE = Path(__file__).resolve().parent.parent
+
+# Taxonomie Apple Podcasts. Une catégorie hors de cette liste fait rejeter le
+# flux à la soumission, sans message utile — d'où la vérification locale.
+CATEGORIES = {
+    "Arts": ["Books", "Design", "Fashion & Beauty", "Food", "Performing Arts", "Visual Arts"],
+    "Business": ["Careers", "Entrepreneurship", "Investing", "Management", "Marketing", "Non-Profit"],
+    "Comedy": ["Comedy Interviews", "Improv", "Stand-Up"],
+    "Education": ["Courses", "How To", "Language Learning", "Self-Improvement"],
+    "Fiction": ["Comedy Fiction", "Drama", "Science Fiction"],
+    "Government": [],
+    "History": [],
+    "Health & Fitness": ["Alternative Health", "Fitness", "Medicine", "Mental Health", "Nutrition", "Sexuality"],
+    "Kids & Family": ["Education for Kids", "Parenting", "Pets & Animals", "Stories for Kids"],
+    "Leisure": ["Animation & Manga", "Automotive", "Aviation", "Crafts", "Games", "Hobbies", "Home & Garden", "Video Games"],
+    "Music": ["Music Commentary", "Music History", "Music Interviews"],
+    "News": ["Business News", "Daily News", "Entertainment News", "News Commentary", "Politics", "Sports News", "Tech News"],
+    "Religion & Spirituality": ["Buddhism", "Christianity", "Hinduism", "Islam", "Judaism", "Religion", "Spirituality"],
+    "Science": ["Astronomy", "Chemistry", "Earth Sciences", "Life Sciences", "Mathematics", "Natural Sciences", "Nature", "Physics", "Social Sciences"],
+    "Society & Culture": ["Documentary", "Personal Journals", "Philosophy", "Places & Travel", "Relationships"],
+    "Sports": ["Baseball", "Basketball", "Boxing", "Cricket", "Fantasy Sports", "Football", "Golf", "Hockey", "Rugby", "Running", "Soccer", "Swimming", "Tennis", "Volleyball", "Wilderness", "Wrestling"],
+    "Technology": [],
+    "True Crime": [],
+    "TV & Film": ["After Shows", "Film History", "Film Interviews", "Film Reviews", "TV Reviews"],
+}
+
+# Namespace officiel du Podcast Index, pour fabriquer le podcast:guid.
+NS_PODCAST = uuid.UUID("ead4c236-bf58-58c6-a2c6-a6b28d128cb6")
+
+TYPES_MEDIA = {".mp3": "audio/mpeg", ".m4a": "audio/x-m4a", ".aac": "audio/aac",
+               ".ogg": "audio/ogg", ".opus": "audio/opus", ".wav": "audio/wav"}
+
+erreurs, alertes = [], []
+
+
+def erreur(m): erreurs.append(m)
+def alerte(m): alertes.append(m)
+
+
+def cdata(texte: str) -> str:
+    """Enveloppe en CDATA. « ]]> » dans le contenu casserait le flux."""
+    return "<![CDATA[" + str(texte).replace("]]>", "]]&gt;") + "]]>"
+
+
+def esc(texte) -> str:
+    return html.escape(str(texte), quote=True)
+
+
+def paragraphes(texte: str) -> str:
+    blocs = [b.strip().replace("\n", " ") for b in str(texte).split("\n\n") if b.strip()]
+    return "".join(f"<p>{html.escape(b)}</p>" for b in blocs)
+
+
+def sonde(fichier: Path, champ: str) -> str:
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", champ, "-of", "csv=p=0", str(fichier)],
+        capture_output=True, text=True)
+    return r.stdout.strip().split("\n")[0] if r.returncode == 0 else ""
+
+
+def hms(secondes: float) -> str:
+    s = int(round(secondes))
+    return f"{s // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d}"
+
+
+def charger_emission() -> dict:
+    chemin = RACINE / "emission.toml"
+    if not chemin.exists():
+        sys.exit("erreur : emission.toml manquant. Copie emission.toml.exemple et remplis-le.")
+    with chemin.open("rb") as f:
+        e = tomllib.load(f).get("emission", {})
+
+    for champ in ("titre", "description", "auteur", "courriel", "site", "flux",
+                  "base_media", "pochette", "categories"):
+        if not e.get(champ):
+            erreur(f"emission.toml : champ « {champ} » manquant ou vide")
+
+    for champ in ("site", "flux", "base_media", "pochette"):
+        v = str(e.get(champ, ""))
+        if v and not v.startswith("https://"):
+            erreur(f"emission.toml : « {champ} » doit être une URL https absolue (lu : {v})")
+    if "REMPLIR" in str(e):
+        erreur("emission.toml : il reste des champs « REMPLIR »")
+
+    for c in e.get("categories", []):
+        principale, _, sous = str(c).partition(" > ")
+        if principale not in CATEGORIES:
+            erreur(f"catégorie Apple inconnue : « {principale} ». "
+                   f"Valides : {', '.join(sorted(CATEGORIES))}")
+        elif sous and sous not in CATEGORIES[principale]:
+            erreur(f"sous-catégorie inconnue sous « {principale} » : « {sous} ». "
+                   f"Valides : {', '.join(CATEGORIES[principale]) or 'aucune'}")
+    if len(e.get("categories", [])) > 3:
+        alerte("Apple n'en retient que 3 : les suivantes sont ignorées")
+
+    locale = e.get("pochette_locale")
+    if locale:
+        p = RACINE / locale
+        if not p.exists():
+            erreur(f"pochette introuvable : {p}")
+        else:
+            dim = sonde(p, "stream=width,height")
+            try:
+                w, h = (int(x) for x in dim.split(","))
+            except ValueError:
+                alerte(f"dimensions de la pochette illisibles ({locale})")
+            else:
+                if w != h:
+                    erreur(f"pochette non carrée : {w}×{h}. Apple refuse.")
+                elif not 1400 <= w <= 3000:
+                    erreur(f"pochette {w}×{h} : Apple exige entre 1400 et 3000 px de côté.")
+                poids = p.stat().st_size / 1e6
+                if poids > 0.5:
+                    alerte(f"pochette de {poids:.1f} Mo : compresse-la, elle est rechargée souvent")
+    return e
+
+
+def charger_episodes(e: dict) -> list:
+    fuseau = ZoneInfo(e.get("fuseau", "Europe/Paris"))
+    hh, _, mm = str(e.get("heure_publication", "06:00")).partition(":")
+    heure = time(int(hh), int(mm or 0), tzinfo=fuseau)
+    sortie_dir = RACINE / "sorties"
+    episodes = []
+
+    # Les dossiers préfixés « _ » sont des gabarits, pas des épisodes.
+    for conf in sorted((RACINE / "episodes").glob("*/episode.toml")):
+        if conf.parent.name.startswith("_"):
+            continue
+        with conf.open("rb") as f:
+            ep = tomllib.load(f).get("episode", {})
+        ou = conf.parent.name
+        for champ in ("numero", "titre", "resume", "date", "fichier"):
+            if ep.get(champ) in (None, ""):
+                erreur(f"{ou}/episode.toml : champ « {champ} » manquant")
+                break
+        else:
+            audio = sortie_dir / str(ep["fichier"])
+            if not audio.exists():
+                erreur(f"{ou} : audio introuvable → sorties/{ep['fichier']}")
+                continue
+            duree = sonde(audio, "format=duration")
+            try:
+                secondes = float(duree)
+            except ValueError:
+                erreur(f"{ou} : durée illisible pour {audio.name}")
+                continue
+            if secondes < 1:
+                erreur(f"{ou} : {audio.name} dure {secondes:.1f} s")
+                continue
+            if audio.suffix.lower() not in TYPES_MEDIA:
+                erreur(f"{ou} : format non géré ({audio.suffix})")
+                continue
+
+            d = ep["date"]
+            publie = datetime.combine(d, heure) if not isinstance(d, datetime) else d
+            ep.update(
+                dossier=ou, audio=audio, secondes=secondes,
+                octets=audio.stat().st_size,
+                type_media=TYPES_MEDIA[audio.suffix.lower()],
+                publie=publie,
+                guid=ep.get("guid") or str(uuid.uuid5(NS_PODCAST, f"{e['flux']}#{ep['numero']}:{ep['fichier']}")),
+            )
+            episodes.append(ep)
+
+    vus = {}
+    for ep in episodes:
+        for cle, nom in (("guid", "GUID"), ("numero", "numéro")):
+            if ep[cle] in vus.setdefault(cle, set()):
+                erreur(f"{nom} en double : {ep[cle]} ({ep['dossier']})")
+            vus[cle].add(ep[cle])
+    if not episodes:
+        alerte("aucun épisode : Apple refuse un flux vide, publie au moins une bande-annonce")
+    if any(ep["publie"] > datetime.now(ZoneInfo(e.get("fuseau", "Europe/Paris"))) for ep in episodes):
+        alerte("un épisode est daté dans le futur : normal si c'est voulu, "
+               "les plateformes le masqueront jusqu'à cette date")
+    return sorted(episodes, key=lambda x: x["publie"], reverse=True)
+
+
+def construire(e: dict, episodes: list) -> str:
+    base = str(e["base_media"]).rstrip("/")
+    lignes = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0"',
+        '     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"',
+        '     xmlns:content="http://purl.org/rss/1.0/modules/content/"',
+        '     xmlns:atom="http://www.w3.org/2005/Atom"',
+        '     xmlns:podcast="https://podcastindex.org/namespace/1.0">',
+        "  <channel>",
+        f'    <title>{esc(e["titre"])}</title>',
+        f'    <description>{cdata(paragraphes(e["description"]))}</description>',
+        f'    <link>{esc(e["site"])}</link>',
+        f'    <language>{esc(e.get("langue", "fr"))}</language>',
+        f'    <atom:link href="{esc(e["flux"])}" rel="self" type="application/rss+xml"/>',
+        f'    <lastBuildDate>{format_datetime(datetime.now(ZoneInfo(e.get("fuseau", "Europe/Paris"))))}</lastBuildDate>',
+        "    <generator>arcanes/flux</generator>",
+        f'    <itunes:author>{esc(e["auteur"])}</itunes:author>',
+        "    <itunes:owner>",
+        f'      <itunes:name>{esc(e.get("proprietaire", e["auteur"]))}</itunes:name>',
+        f'      <itunes:email>{esc(e["courriel"])}</itunes:email>',
+        "    </itunes:owner>",
+        f'    <itunes:image href="{esc(e["pochette"])}"/>',
+        f'    <itunes:explicit>{"true" if e.get("explicite") else "false"}</itunes:explicit>',
+        f'    <itunes:type>{esc(e.get("type", "episodic"))}</itunes:type>',
+        # Identifiant stable de l'émission pour le Podcast Index : UUIDv5 de
+        # l'URL du flux, protocole et slash final retirés, comme le veut la spec.
+        f'    <podcast:guid>{uuid.uuid5(NS_PODCAST, str(e["flux"]).split("://", 1)[-1].rstrip("/"))}</podcast:guid>',
+    ]
+    if e.get("sous_titre"):
+        lignes.append(f'    <itunes:subtitle>{esc(e["sous_titre"])}</itunes:subtitle>')
+    if e.get("copyright"):
+        lignes.append(f'    <copyright>{esc(e["copyright"])}</copyright>')
+    if e.get("verrou", True):
+        # Empêche un autre hébergeur de réclamer ton flux sans ton accord.
+        lignes.append(f'    <podcast:locked owner="{esc(e["courriel"])}">yes</podcast:locked>')
+    for c in list(e.get("categories", []))[:3]:
+        principale, _, sous = str(c).partition(" > ")
+        if sous:
+            lignes += [f'    <itunes:category text="{esc(principale)}">',
+                       f'      <itunes:category text="{esc(sous)}"/>',
+                       "    </itunes:category>"]
+        else:
+            lignes.append(f'    <itunes:category text="{esc(principale)}"/>')
+
+    for ep in episodes:
+        url = f"{base}/{ep['fichier']}"
+        lignes += [
+            "    <item>",
+            f'      <title>{esc(ep["titre"])}</title>',
+            f'      <description>{cdata(paragraphes(ep["resume"]))}</description>',
+            f'      <itunes:summary>{cdata(paragraphes(ep["resume"]))}</itunes:summary>',
+            f'      <enclosure url="{esc(url)}" length="{ep["octets"]}" type="{ep["type_media"]}"/>',
+            f'      <guid isPermaLink="false">{esc(ep["guid"])}</guid>',
+            f"      <pubDate>{format_datetime(ep['publie'])}</pubDate>",
+            f'      <itunes:duration>{hms(ep["secondes"])}</itunes:duration>',
+            f'      <itunes:episode>{int(ep["numero"])}</itunes:episode>',
+            f'      <itunes:episodeType>{esc(ep.get("type", "full"))}</itunes:episodeType>',
+            f'      <itunes:explicit>{"true" if ep.get("explicite", e.get("explicite")) else "false"}</itunes:explicit>',
+        ]
+        if ep.get("saison"):
+            lignes.append(f'      <itunes:season>{int(ep["saison"])}</itunes:season>')
+        if ep.get("pochette"):
+            lignes.append(f'      <itunes:image href="{esc(ep["pochette"])}"/>')
+        if e.get("site") and ep.get("page"):
+            lignes.append(f'      <link>{esc(ep["page"])}</link>')
+        lignes.append("    </item>")
+
+    lignes += ["  </channel>", "</rss>", ""]
+    return "\n".join(lignes)
+
+
+def main() -> int:
+    verif_seule = "--verifier" in sys.argv
+    e = charger_emission()
+    episodes = charger_episodes(e) if not erreurs else []
+    xml = construire(e, episodes) if not erreurs else ""
+
+    if xml:
+        bien_forme = subprocess.run(["xmllint", "--noout", "-"], input=xml, text=True,
+                                    capture_output=True)
+        if bien_forme.returncode != 0:
+            erreur("XML mal formé :\n" + bien_forme.stderr.strip())
+
+    # Tout sur stderr : les alertes et les erreurs restent dans l'ordre.
+    for m in alertes:
+        print(f"  ⚠ {m}", file=sys.stderr)
+    for m in erreurs:
+        print(f"  ✗ {m}", file=sys.stderr)
+    if erreurs:
+        print(f"\n{len(erreurs)} erreur(s) : flux non écrit.", file=sys.stderr)
+        return 1
+
+    cible = RACINE / "sorties" / "flux.xml"
+    if verif_seule:
+        print(f"\n✓ flux valide, {len(episodes)} épisode(s) — rien écrit (--verifier)")
+        return 0
+    cible.parent.mkdir(exist_ok=True)
+    cible.write_text(xml, encoding="utf-8")
+    total = sum(ep["secondes"] for ep in episodes)
+    print(f"\n✓ {cible}")
+    print(f"  {len(episodes)} épisode(s), {total / 60:.0f} min au total, {len(xml) / 1024:.1f} Kio")
+    if episodes:
+        print(f"  dernier : « {episodes[0]['titre']} » du {episodes[0]['publie']:%d/%m/%Y}")
+    print(f"\n  À déposer à l'adresse déclarée : {e['flux']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

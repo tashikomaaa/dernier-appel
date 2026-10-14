@@ -1,0 +1,132 @@
+:root{
+  --fond:#0A0A0C; --fond2:#121117; --carte:#15141A; --bord:#FFFFFF14;
+  --texte:#F0E9DB; --gris:#8F887E; --ambre:#E8A33D; --cuivre:#C8822A;
+  --rouge:#D8453F; --vert:#5FBF6A;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--fond);color:var(--texte);overflow:hidden;
+  font:14px/1.6 system-ui,-apple-system,sans-serif;user-select:none}
+.app{display:flex;height:100vh}
+
+/* ───────────── rail ───────────── */
+.rail{width:206px;flex:0 0 206px;background:#07070A;border-right:1px solid var(--bord);
+  display:flex;flex-direction:column;padding:18px 12px;gap:4px}
+.marque{padding:6px 10px 20px;display:flex;flex-direction:column;gap:2px}
+.marque b{font:700 17px/1.2 'Noto Serif',Georgia,serif;letter-spacing:.01em}
+.marque small{color:var(--gris);font-size:11px;letter-spacing:.22em;text-transform:uppercase}
+.etape{display:flex;align-items:center;gap:11px;padding:9px 10px;border:0;border-radius:7px;
+  background:transparent;color:var(--gris);font:inherit;cursor:pointer;text-align:left;width:100%}
+.etape i{width:21px;height:21px;border-radius:50%;border:1px solid #FFFFFF26;
+  display:grid;place-items:center;font:600 11px/1 system-ui;font-style:normal;flex:0 0 auto}
+.etape:hover{background:#FFFFFF0A;color:var(--texte)}
+.etape.actif{background:#FFFFFF12;color:var(--texte)}
+.etape.actif i{border-color:var(--ambre);color:var(--ambre)}
+.etape:disabled{opacity:.35;cursor:not-allowed}
+.courant{margin-top:auto;padding:12px 10px;border-top:1px solid var(--bord);
+  color:var(--gris);font-size:12px;line-height:1.45}
+
+/* ───────────── vues ───────────── */
+main{flex:1;position:relative;min-width:0}
+.vue{position:absolute;inset:0;display:none;flex-direction:column}
+.vue.visible{display:flex}
+.vue:not(.sans-marge) header{padding:30px 34px 18px}
+.vue h1{font:700 25px/1.2 'Noto Serif',Georgia,serif}
+.vue header p{color:var(--gris);max-width:62ch;margin-top:7px}
+.corps{flex:1;overflow:auto;padding:8px 34px 30px;display:flex;flex-direction:column;gap:16px}
+
+.encart{background:var(--carte);border:1px solid var(--bord);border-radius:10px;padding:18px}
+.encart h3{font-size:14px;margin-bottom:4px}
+.aide{color:var(--gris);font-size:12.5px;margin-bottom:12px}
+.ligne{display:flex;gap:9px}
+.ligne input[type=number]{width:84px}
+.ligne input[type=text]{flex:1}
+.grille{display:grid;grid-template-columns:auto 1fr;gap:12px 18px;align-items:center}
+.grille label{color:var(--gris)}
+input,select{background:#0D0C11;border:1px solid #FFFFFF1F;color:var(--texte);
+  border-radius:7px;padding:8px 11px;font:inherit;min-width:0}
+input:focus,select:focus{outline:none;border-color:var(--cuivre)}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--cuivre);justify-self:start}
+button{background:#1C1B22;border:1px solid #FFFFFF1F;color:var(--texte);border-radius:7px;
+  padding:9px 15px;font:inherit;cursor:pointer}
+button:hover:not(:disabled){background:#26242D}
+button:disabled{opacity:.4;cursor:not-allowed}
+.primaire{background:var(--cuivre);border-color:var(--cuivre);color:#17120A;font-weight:600}
+.primaire:hover:not(:disabled){background:var(--ambre)}
+.danger{border-color:#D8453F55;color:#E8847F}
+.danger:hover:not(:disabled){background:#2A1514}
+.actions{display:flex;gap:9px}
+.ligne-micro{display:flex;align-items:center;gap:10px}
+.ligne-micro label{color:var(--gris);flex:0 0 auto}
+.ligne-micro select{flex:1;min-width:0}
+
+.cartes{display:flex;flex-direction:column;gap:9px}
+.carte{display:flex;align-items:center;gap:14px;background:var(--carte);
+  border:1px solid var(--bord);border-radius:10px;padding:14px 16px;cursor:pointer;width:100%;text-align:left}
+.carte:hover{border-color:#FFFFFF33}
+.carte.choisi{border-color:var(--cuivre);background:#1A1610}
+.carte .titre{font:600 15px/1.3 'Noto Serif',Georgia,serif;flex:1}
+.puces{display:flex;gap:7px;flex-wrap:wrap}
+.puce{font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid var(--bord);color:var(--gris)}
+.puce.ok{color:var(--vert);border-color:#5FBF6A40}
+
+.journal{background:#07070A;border:1px solid var(--bord);border-radius:10px;padding:14px;
+  font:12px/1.65 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;
+  overflow:auto;flex:1;min-height:150px;color:#C9C3B8;user-select:text}
+.alerte{background:#2A1D10;border:1px solid #E8A33D4D;color:#F3D9AC;
+  border-radius:10px;padding:13px 16px;font-size:13px}
+.etapes-pub{display:flex;flex-direction:column;gap:9px}
+.etapes-pub button{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:14px 16px}
+.etapes-pub b{font-size:14px}
+.etapes-pub span{color:var(--gris);font-size:12.5px;font-weight:400}
+
+/* ───────────── prompteur ───────────── */
+#vue-prise{background:var(--fond)}
+.scene{position:relative;flex:1;overflow:hidden}
+#ruban{position:absolute;left:0;right:0;top:0;will-change:transform;
+  padding:42vh 0 78vh;max-width:21em;margin:0 auto;
+  font:700 clamp(26px,3.1vw,46px)/1.45 'Noto Serif',Georgia,serif}
+#ruban .texte{opacity:.42;margin:0 0 .62em;transition:opacity .28s ease}
+#ruban .texte.actif{opacity:1}
+#ruban .indication{font:italic 400 .42em/1.55 system-ui,sans-serif;color:var(--cuivre);
+  margin:0 0 1.5em;padding-left:1em;border-left:2px solid #C8822A55;max-width:40em}
+#ruban .section{font:600 .28em/1 system-ui,sans-serif;color:#6E685F;letter-spacing:.3em;
+  text-transform:uppercase;margin:3.4em 0 1.9em}
+.voile-haut,.voile-bas,.guide{position:absolute;left:0;right:0;pointer-events:none}
+.voile-haut{top:0;height:24%;
+  background:linear-gradient(var(--fond) 0%,rgba(10,10,12,.55) 55%,rgba(10,10,12,0) 100%)}
+.voile-bas{bottom:0;height:17%;background:linear-gradient(to top,var(--fond) 0%,rgba(10,10,12,0) 100%)}
+.guide{top:38%;height:1px;background:#E8A33D33}
+.guide::before{content:'';position:absolute;left:14px;top:-6px;border:6px solid transparent;
+  border-left-color:var(--ambre);opacity:.7}
+.barre{display:flex;align-items:center;gap:17px;padding:11px 18px;background:#07070A;
+  border-top:1px solid var(--bord)}
+.pastille{width:10px;height:10px;border-radius:50%;background:#4A463F;flex:0 0 auto}
+body.enregistre .pastille{background:var(--rouge);animation:bat 1.1s infinite}
+@keyframes bat{50%{opacity:.25}}
+#etat-prise{min-width:190px;font-weight:600}
+.chrono{font:700 21px/1 ui-monospace,monospace;min-width:62px}
+.progres{flex:1;height:3px;background:#FFFFFF14;border-radius:2px;overflow:hidden}
+#avance{height:100%;width:0;background:var(--ambre)}
+.info{color:var(--gris);font-size:12px;white-space:nowrap}
+.touches{display:flex;gap:5px;align-items:center}
+kbd{background:#FFFFFF12;border-radius:3px;padding:2px 5px;font:600 11px ui-monospace,monospace;
+  color:var(--texte)}
+@media(max-width:1180px){.touches{display:none}}
+/* Fenêtre étroite — courant en tuiles : le rail se réduit à ses numéros. */
+@media(max-width:860px){
+  .rail{width:62px;flex-basis:62px;padding:12px 8px;align-items:center}
+  .marque{display:none}
+  .etape{justify-content:center;padding:9px 0}
+  .etape span{display:none}
+  .courant{display:none}
+  .vue:not(.sans-marge) header{padding:20px 20px 12px}
+  .corps{padding:6px 20px 20px}
+  #etat-prise{min-width:0}
+  .barre{gap:10px;padding:8px 12px}
+}
+@media(max-height:560px){
+  #ruban{padding:38vh 0 72vh}
+  .vue h1{font-size:21px}
+  .vue header p{display:none}
+}

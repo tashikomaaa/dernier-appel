@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""inventaire — l'état du projet en JSON.
+
+Sert de pont entre les outils (en Python) et l'interface (en JavaScript) : une
+seule lecture des fichiers du projet, un seul format de sortie.
+
+    bin/inventaire               émission, épisodes, entrées micro
+    bin/inventaire --script F    découpage d'un script en blocs
+"""
+import json
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parent.parent
+
+
+def parser_script(chemin: Path):
+    """Sépare ce qui est lu de ce qui ne l'est pas : les titres jalonnent, les
+    citations sont des indications de jeu, le reste est le texte."""
+    blocs, tampon, genre = [], [], None
+
+    def vider():
+        nonlocal tampon, genre
+        if tampon:
+            t = re.sub(r"\[[^\]]*\]", "", " ".join(tampon))
+            t = re.sub(r"\s{2,}", " ", t).strip()
+            if t:
+                blocs.append({"genre": genre, "texte": t,
+                              "mots": len([m for m in t.split()
+                                           if any(c.isalnum() for c in m)])})
+        tampon, genre = [], None
+
+    for ligne in chemin.read_text(encoding="utf-8").splitlines():
+        nu = ligne.strip()
+        if nu.startswith("#"):
+            vider()
+            blocs.append({"genre": "section", "texte": nu.lstrip("#").strip(), "mots": 0})
+        elif nu.startswith(">"):
+            if genre != "indication":
+                vider()
+            genre = "indication"
+            tampon.append(nu.lstrip(">").strip())
+        elif not nu:
+            vider()
+        else:
+            if genre != "texte":
+                vider()
+            genre = "texte"
+            tampon.append(nu)
+    vider()
+    return [b for b in blocs if b["texte"]]
+
+
+def charger_toml(chemin, cle):
+    if not chemin.exists():
+        return {}
+    try:
+        with chemin.open("rb") as f:
+            return tomllib.load(f).get(cle, {})
+    except Exception:
+        return {}
+
+
+def episodes():
+    out = []
+    for d in sorted((RACINE / "episodes").glob("*/")):
+        if d.name.startswith("_"):
+            continue
+        meta = charger_toml(d / "episode.toml", "episode")
+        script = d / "script.md"
+        fichier = str(meta.get("fichier") or "")
+        monte = (RACINE / "sorties" / fichier) if fichier else None
+        out.append({
+            "nom": d.name,
+            "dossier": str(d),
+            "titre": meta.get("titre") or d.name,
+            "numero": meta.get("numero"),
+            "date": str(meta.get("date")) if meta.get("date") else None,
+            "fichier": fichier,
+            "type": meta.get("type") or "full",
+            "script": str(script) if script.exists() else None,
+            "prises": [str(p) for p in sorted((RACINE / "prises").glob(f"{d.name}*.wav"))],
+            "monte": str(monte) if monte and monte.exists() else None,
+            "transcription": bool(fichier) and (RACINE / "sorties" / (Path(fichier).stem + ".txt")).exists(),
+        })
+    return out
+
+
+def sources():
+    """Entrées micro, avec leur nom lisible. On lit « pactl list sources » et
+    non la forme courte : seule la forme longue porte la description, et
+    « alsa_input.usb-WOODBRASS_UM3-00.analog-stereo » ne dit rien à personne."""
+    try:
+        r = subprocess.run(["pactl", "list", "sources"],
+                           capture_output=True, text=True, timeout=5)
+    except Exception:
+        return []
+    out, nom, desc = [], None, None
+    for ligne in r.stdout.splitlines():
+        l = ligne.strip()
+        if l.startswith("Name: "):
+            nom, desc = l[6:], None
+        elif l.startswith("Description: ") and nom:
+            desc = l[13:]
+        if nom and desc:
+            if not nom.endswith(".monitor"):
+                out.append({"nom": nom, "libelle": desc,
+                            "usb": ".usb-" in nom or "usb" in desc.lower()})
+            nom = desc = None
+    return out
+
+
+def main():
+    if "--script" in sys.argv:
+        chemin = Path(sys.argv[sys.argv.index("--script") + 1])
+        if not chemin.exists():
+            print(json.dumps({"erreur": f"{chemin} introuvable"}))
+            return 1
+        print(json.dumps({"blocs": parser_script(chemin)}, ensure_ascii=False))
+        return 0
+
+    emission = charger_toml(RACINE / "emission.toml", "emission")
+    musiques = sorted(str(p.relative_to(RACINE))
+                      for p in (RACINE / "assets" / "musique").glob("*")
+                      if p.is_file())
+    ambiance = RACINE / "assets" / "ambiance-bar.wav"
+    print(json.dumps({
+        "racine": str(RACINE),
+        "emission": {k: str(v) for k, v in emission.items() if not isinstance(v, (list, dict))},
+        "a_remplir": "REMPLIR" in str(emission) or not emission,
+        "episodes": episodes(),
+        "sources": sources(),
+        "ambiance": str(ambiance.relative_to(RACINE)) if ambiance.exists() else None,
+        "musiques": musiques,
+        "pochette": "assets/pochette.jpg" if (RACINE / "assets" / "pochette.jpg").exists() else None,
+    }, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

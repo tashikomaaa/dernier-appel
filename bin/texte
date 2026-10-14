@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# texte — extrait la transcription d'un script.
+#
+# Tu lis un texte écrit : la transcription existe donc déjà, il suffit d'enlever
+# ce qui n'est pas lu. Pas besoin d'un moteur de reconnaissance vocale pour le
+# cas normal — « bin/transcrire » ne sert que si tu t'écartes beaucoup du script,
+# ou pour obtenir des sous-titres minutés.
+set -euo pipefail
+[ $# -eq 0 ] && { echo "usage: texte episodes/NNN-sujet/script.md [...]" >&2; exit 2; }
+RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+for f in "$@"; do
+  [ -f "$f" ] || { echo "erreur : $f introuvable." >&2; exit 1; }
+  # On retire les titres, les indications entre chevrons, les notes entre
+  # crochets et les commentaires ; on garde les lignes vides, qui portent les
+  # paragraphes de la page web.
+  nom="$(basename "$(dirname "$f")")"
+  cible="$RACINE/sorties/${nom}.txt"
+  mkdir -p "$RACINE/sorties"
+  sed -e 's/<!--.*-->//g' -e '/^#/d' -e '/^>/d' -e 's/\[[^]]*\]//g' "$f" \
+    | cat -s | sed -e '1{/^$/d}' > "$cible"
+  printf '✓ %s  (%s mots)\n' "$cible" "$(wc -w < "$cible")"
+done

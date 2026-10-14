@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# studio — ouvre l'atelier : épisode, micro, prise, montage, publication.
+#
+# L'interface est dans app/ (Electron). Toute la logique reste dans les outils
+# de bin/, que l'application appelle — une seule implémentation, utilisable
+# aussi bien à la souris qu'en ligne de commande.
+set -euo pipefail
+RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+ELECTRON=""
+for c in electron electron43 electron42 electron41 electron40 electron39; do
+  command -v "$c" >/dev/null 2>&1 && { ELECTRON="$c"; break; }
+done
+if [ -z "$ELECTRON" ]; then
+  echo "erreur : Electron n'est pas installé." >&2
+  echo "  sudo pacman -S electron" >&2
+  exit 1
+fi
+
+drapeaux=()
+# Sans ça, Electron passe par XWayland : fenêtre floue sur écran HiDPI et
+# décorations incohérentes avec le reste du bureau.
+[ -n "${WAYLAND_DISPLAY:-}" ] && drapeaux+=(--ozone-platform-hint=auto
+                                            --enable-features=WaylandWindowDecorations)
+
+exec "$ELECTRON" "${drapeaux[@]}" "$RACINE/app" "$@"

@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""nouvel-episode — crée un dossier d'épisode à partir du gabarit.
+
+    bin/nouvel-episode 4 "le tresor de rennes le chateau"
+"""
+import re
+import shutil
+import sys
+from pathlib import Path
+
+RACINE = Path(__file__).resolve().parent.parent
+
+if len(sys.argv) < 3:
+    sys.exit("usage: nouvel-episode <numéro> <sujet>")
+try:
+    numero = int(sys.argv[1])
+except ValueError:
+    sys.exit("erreur : le numéro doit être un entier.")
+
+sujet = " ".join(sys.argv[2:])
+slug = re.sub(r"[^a-z0-9]+", "-",
+              sujet.lower().translate(str.maketrans("àâäéèêëîïôöùûüç", "aaaeeeeiioouuuc"))
+              ).strip("-")
+if not slug:
+    sys.exit("erreur : sujet vide.")
+
+cible = RACINE / "episodes" / f"{numero:03d}-{slug}"
+if cible.exists():
+    sys.exit(f"erreur : {cible.relative_to(RACINE)} existe déjà.")
+shutil.copytree(RACINE / "episodes" / "_modele", cible)
+
+conf = cible / "episode.toml"
+conf.write_text(conf.read_text(encoding="utf-8")
+                .replace("numero = 0", f"numero = {numero}")
+                .replace('titre  = "REMPLIR"', f'titre  = "{sujet.strip().capitalize()}"')
+                .replace('fichier = "000-remplir.mp3"', f'fichier = "{numero:03d}-{slug}.mp3"'),
+                encoding="utf-8")
+print(f"✓ {cible.relative_to(RACINE)}")
+print(f"  brief.md, script.md, publication.md et episode.toml sont prêts à remplir.")

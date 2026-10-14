@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# rec — enregistre une prise propre sans ouvrir de logiciel.
+# Le gain mal réglé est la première cause de prise irrécupérable : commence
+# toujours par « rec --test ».
+set -euo pipefail
+
+RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOURCE=""; NOM=""; TEST=0; DUREE_TEST=6; DEPUIS=""
+
+usage() {
+  cat <<'USAGE'
+rec [options] [nom]
+
+  --test            enregistre 6 s et juge le réglage du gain
+  --depuis F        juge un fichier déjà enregistré, sans ouvrir le micro
+  --source NOM      entrée PipeWire à utiliser (voir « rec --sources »)
+  --sources         liste les entrées disponibles
+  nom               nom de la prise (défaut: prise-AAAAMMJJ-HHMM)
+
+La prise est écrite dans prises/, en mono 48 kHz 24 bits.
+Arrête l'enregistrement avec Ctrl-C.
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --test) TEST=1; shift ;;
+    --depuis) DEPUIS="$2"; TEST=1; shift 2 ;;
+    --source) SOURCE="$2"; shift 2 ;;
+    --sources) pactl list sources short | awk '$2 !~ /\.monitor$/ {print "  " $2}'; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "option inconnue : $1" >&2; exit 2 ;;
+    *) NOM="$1"; shift ;;
+  esac
+done
+
+cible=(); [ -n "$SOURCE" ] && cible=(--target "$SOURCE")
+
+if [ "$TEST" -eq 1 ]; then
+  if [ -n "$DEPUIS" ]; then
+    [ -f "$DEPUIS" ] || { echo "erreur : $DEPUIS introuvable." >&2; exit 1; }
+    tmp="$DEPUIS"
+  else
+    tmp="$(mktemp --suffix=.wav)"; trap 'rm -f "$tmp"' EXIT
+    echo "Parle normalement pendant ${DUREE_TEST} s, au volume de l'épisode..."
+    timeout "$DUREE_TEST" pw-record --rate 48000 --channels 1 --format s24 \
+      "${cible[@]}" "$tmp" || true
+  fi
+  stats="$(ffmpeg -hide_banner -nostats -i "$tmp" -af astats=metadata=1 -f null - 2>&1)"
+  lire() { echo "$stats" | grep -m1 -E "$1" | sed 's/.*: *//' | tr -d ' '; }
+  # On ne se sert pas de « Noise floor » : c'est une statistique globale qui colle
+  # au niveau de la voix. L'écart entre la fenêtre la plus forte (la parole) et la
+  # plus faible (la pièce pendant les respirations) est la vraie mesure utile.
+  CRETE="$(lire 'Peak level dB')"
+  VOIX="$(lire 'RMS peak dB')"
+  FOND="$(lire 'RMS (through|trough) dB')"
+  NCRETE="$(lire 'Abs Peak count')"   # beaucoup d'échantillons collés au maximum
+                                      # = signal rogné par l'écrêtage
+  LUFS="$(ffmpeg -hide_banner -nostats -i "$tmp" -af ebur128=framelog=quiet -f null - 2>&1 \
+          | grep -A4 Summary | grep -m1 'I:' | sed 's/.*I: *//')"
+  case "$CRETE$VOIX$FOND" in
+    *inf*|'') echo "  ✗ prise muette ou illisible : rien à mesurer." >&2; exit 1 ;;
+  esac
+  SNR="$(awk -v a="$VOIX" -v b="$FOND" 'BEGIN{printf "%.0f", a-b}')"
+  echo
+  printf '  crête              %6.1f dB\n' "$CRETE"
+  printf '  voix (RMS fort)    %6.1f dB\n' "$VOIX"
+  printf '  pièce (RMS faible) %6.1f dB\n' "$FOND"
+  printf '  marge voix/pièce   %6s dB\n' "$SNR"
+  printf '  loudness           %6s\n' "$LUFS"
+  echo
+  sup() { [ "$(awk -v a="$1" -v b="$2" 'BEGIN{print (a>=b)?1:0}')" = 1 ]; }
+  inf() { [ "$(awk -v a="$1" -v b="$2" 'BEGIN{print (a<b)?1:0}')" = 1 ]; }
+  verdict=0
+  # « Flat factor » ne sert pas ici : il monte aussi sur un signal propre et
+  # faible, où les échantillons voisins se répètent souvent.
+  if sup "$CRETE" -0.5 && sup "${NCRETE:-0}" 10; then
+    echo "  ✗ ÇA SATURE. Baisse le gain de 6 à 10 dB et refais la prise :"
+    echo "    une crête écrêtée ne se répare pas, aucun traitement ne la rattrape."
+    verdict=1
+  elif sup "$CRETE" -1; then
+    echo "  ✗ crête à la limite ($NCRETE échantillons au maximum). Baisse le gain"
+    echo "    de 6 dB : tu es à un éclat de voix de l'écrêtage."
+    verdict=1
+  elif sup "$CRETE" -3; then
+    echo "  ⚠ crête trop près de 0. Baisse le gain de 3 à 6 dB pour te garder"
+    echo "    de la marge sur un éclat de voix."
+    verdict=1
+  elif inf "$VOIX" -30; then
+    echo "  ⚠ voix trop faible. Monte le gain ou rapproche-toi du micro."
+    echo "    Remonter au montage remonte aussi le souffle de la pièce."
+    verdict=1
+  else
+    echo "  ✓ niveau correct, avec de la marge sous 0 dB."
+  fi
+  if inf "$SNR" 20; then
+    echo "  ✗ la voix ne dépasse la pièce que de ${SNR} dB. À corriger avant tout :"
+    echo "    micro à deux poings de la bouche, légèrement de côté ; ventilation,"
+    echo "    ventilateurs et fenêtre coupés ; une couverture sur un mur nu suffit"
+    echo "    souvent à faire tomber la réverbération."
+    verdict=1
+  elif inf "$SNR" 32; then
+    echo "  ⚠ marge de ${SNR} dB : exploitable, mais le débruitage laissera un voile"
+    echo "    sur la voix. Vise 35 dB si tu peux te rapprocher du micro."
+  else
+    echo "  ✓ marge de ${SNR} dB sur le fond sonore : prise propre."
+  fi
+  [ "$verdict" -eq 0 ] && echo && echo "  Prêt à enregistrer : rec mon-episode"
+  exit 0
+fi
+
+mkdir -p "$RACINE/prises"
+NOM="${NOM:-prise-$(date +%Y%m%d-%H%M)}"
+FICHIER="$RACINE/prises/${NOM%.wav}.wav"
+[ -e "$FICHIER" ] && { echo "erreur : $FICHIER existe déjà." >&2; exit 1; }
+echo "Enregistrement → $FICHIER"
+echo "Ctrl-C pour arrêter. Respire une seconde avant de commencer à parler."
+pw-record --rate 48000 --channels 1 --format s24 "${cible[@]}" "$FICHIER" || true
+echo
+if [ -s "$FICHIER" ]; then
+  echo "✓ $FICHIER  ($(ffprobe -v error -show_entries format=duration -of csv=p=0 "$FICHIER" | cut -d. -f1) s, $(du -h "$FICHIER" | cut -f1))"
+  echo "  Au montage :  master --coupe-silences -t \"Titre\" \"$FICHIER\""
+else
+  echo "✗ rien n'a été enregistré. Vérifie l'entrée avec « rec --sources »." >&2
+  exit 1
+fi
