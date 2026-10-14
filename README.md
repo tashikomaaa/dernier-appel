@@ -1,4 +1,4 @@
-# les arcanes de l'histoire — atelier de production
+# Dernier appel — atelier de production
 
 Objectif de cet atelier : qu'un épisode coûte **une soirée**, pas un week-end.
 Pas de montage multipiste. Une prise lue, une commande, un fichier publiable.
