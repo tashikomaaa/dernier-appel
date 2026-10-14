@@ -123,9 +123,12 @@ def main():
         return 0
 
     emission = charger_toml(RACINE / "emission.toml", "emission")
+    # Seulement de l'audio : une note d'attribution posée à côté du morceau
+    # ne doit pas se retrouver proposée comme bande-son.
+    AUDIO = {".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".aiff"}
     musiques = sorted(str(p.relative_to(RACINE))
                       for p in (RACINE / "assets" / "musique").glob("*")
-                      if p.is_file())
+                      if p.is_file() and p.suffix.lower() in AUDIO)
     ambiance = RACINE / "assets" / "ambiance-bar.wav"
     print(json.dumps({
         "racine": str(RACINE),

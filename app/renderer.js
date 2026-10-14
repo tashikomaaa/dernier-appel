@@ -14,6 +14,8 @@ function aller(nom) {
   $$('.vue').forEach((v) => v.classList.toggle('visible', v.id === `vue-${nom}`))
   $$('.etape').forEach((b) => b.classList.toggle('actif', b.dataset.vue === nom))
   if (nom === 'micro' && typeof rafraichirSources === 'function') rafraichirSources()
+  // La vue vient d'apparaître : c'est seulement maintenant qu'elle est mesurable.
+  if (nom === 'prise' && typeof remesurer === 'function') requestAnimationFrame(remesurer)
 }
 $$('.etape').forEach((b) => b.addEventListener('click', () => aller(b.dataset.vue)))
 
@@ -161,8 +163,7 @@ function construireRuban() {
     b.el = p
   }
   horloge = 0
-  calendrier()
-  placer(0)
+  remesurer()
   const mots = BLOCS.filter((b) => b.genre === 'texte').reduce((s, b) => s + b.mots, 0)
   $('#etat-prise').textContent = `${mots} mots · ${Math.floor(mots / mpm)} min ${String(Math.round(mots * 60 / mpm % 60)).padStart(2, '0')} s`
 }
@@ -170,7 +171,24 @@ function construireRuban() {
 // Chaque bloc avance au rythme de ce qu'il contient : le texte au rythme de
 // lecture choisi, les indications bien plus vite puisqu'on ne les prononce pas.
 // À vitesse constante, on court sur les passages denses.
+//
+// Mesurer n'a de sens que si la vue est affichée : dans un sous-arbre en
+// display:none, offsetTop et offsetHeight valent zéro, et un calendrier calculé
+// là reste faux pour toujours — le ruban semble bloqué et saute d'un bloc à
+// l'autre. D'où le refus de mesurer à vide, et l'observateur plus bas.
 function calendrier() {
+  const h = scene.clientHeight
+  if (!h || !BLOCS.length || !ruban.offsetHeight) return false
+
+  // Le rembourrage se cale sur la scène, pas sur le viewport : la scène est
+  // plus courte que la fenêtre (en-tête et bandeau), et le repère de lecture
+  // est lui aussi un pourcentage de la scène. Les deux doivent s'accorder.
+  const haut = Math.round(h * 0.42) + 'px'
+  if (ruban.style.paddingTop !== haut) {
+    ruban.style.paddingTop = haut
+    ruban.style.paddingBottom = Math.round(h * 0.80) + 'px'
+  }
+
   let t = 0
   for (const b of BLOCS) {
     if (!b.el) continue
@@ -182,11 +200,19 @@ function calendrier() {
     t += b.duree
   }
   duree = t
+  return true
 }
-addEventListener('resize', () => { calendrier(); placer(horloge) })
+
+function remesurer() { if (calendrier()) placer(horloge) }
+addEventListener('resize', remesurer)
+// Se déclenche quand la vue passe de masquée à visible, quand la fenêtre change
+// de taille, et quand les polices finissent de charger — les trois moments où
+// les mesures précédentes deviennent fausses.
+new ResizeObserver(remesurer).observe(ruban)
+if (document.fonts) document.fonts.ready.then(remesurer)
 
 function placer(t) {
-  if (!BLOCS.length) return
+  if (!BLOCS.length || !duree) return
   let b = BLOCS[0]
   for (const c of BLOCS) if (c.debut <= t) b = c
   const part = b.duree > 0 ? Math.min(1, (t - b.debut) / b.duree) : 1
@@ -253,21 +279,25 @@ async function arreterPrise() {
   aller('montage')
 }
 
-$('#btn-prise').addEventListener('click', basculerPrise)
+$('#btn-prise').addEventListener('click', () => { arme = true; basculerPrise() })
 $('#btn-stop').addEventListener('click', arreterPrise)
 
-// La fenêtre peut recevoir le focus sans qu'on l'ait voulu (changement de
-// bureau, règle du gestionnaire de fenêtres). Sans ce délai, la première barre
-// d'espace tapée ailleurs déclencherait un enregistrement.
-let focusDepuis = 0
-addEventListener('focus', () => { focusDepuis = performance.now() })
+// Une fenêtre qui s'ouvre prend le focus d'elle-même sous la plupart des
+// gestionnaires. Si la barre d'espace suffisait à lancer une prise, une phrase
+// tapée ailleurs partirait dans le micro. On exige donc un clic dans la fenêtre
+// depuis la dernière prise de focus : taper ne suffit pas, cliquer oui.
+let arme = false
+addEventListener('focus', () => { arme = false })
+addEventListener('blur', () => { arme = false })
+addEventListener('pointerdown', () => { arme = true })
 
 addEventListener('keydown', (e) => {
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return
   if (!$('#vue-prise').classList.contains('visible')) return
-  if (e.code === 'Space' && !enregistre && performance.now() - focusDepuis < 1000) {
+  if (e.code === 'Space' && !enregistre && !arme) {
     e.preventDefault()
-    etat('fenêtre tout juste au premier plan — appuie à nouveau pour démarrer')
+    arme = true
+    etat('clique dans la fenêtre, puis espace pour démarrer')
     return
   }
   if (e.code === 'Space') { e.preventDefault(); basculerPrise() }
@@ -276,8 +306,8 @@ addEventListener('keydown', (e) => {
     window.studio.recMarquer().then((r) => { if (r.n) etat(`Reprise ${r.n} marquée`) })
   }
   else if (e.key === 'r' || e.key === 'R') { horloge = 0; placer(0) }
-  else if (e.key === 'ArrowUp') { mpm += 5; $('#mpm').textContent = mpm; calendrier() }
-  else if (e.key === 'ArrowDown') { mpm = Math.max(60, mpm - 5); $('#mpm').textContent = mpm; calendrier() }
+  else if (e.key === 'ArrowUp') { mpm += 5; $('#mpm').textContent = mpm; remesurer() }
+  else if (e.key === 'ArrowDown') { mpm = Math.max(60, mpm - 5); $('#mpm').textContent = mpm; remesurer() }
   else if (/^[1-9]$/.test(e.key)) {
     const s = BLOCS.filter((b) => b.genre === 'section')[+e.key - 1]
     if (s) { horloge = s.debut; placer(horloge) }

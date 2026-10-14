@@ -84,7 +84,7 @@ button:disabled{opacity:.4;cursor:not-allowed}
 #vue-prise{background:var(--fond)}
 .scene{position:relative;flex:1;overflow:hidden}
 #ruban{position:absolute;left:0;right:0;top:0;will-change:transform;
-  padding:42vh 0 78vh;max-width:21em;margin:0 auto;
+  max-width:21em;margin:0 auto;
   font:700 clamp(26px,3.1vw,46px)/1.45 'Noto Serif',Georgia,serif}
 #ruban .texte{opacity:.42;margin:0 0 .62em;transition:opacity .28s ease}
 #ruban .texte.actif{opacity:1}

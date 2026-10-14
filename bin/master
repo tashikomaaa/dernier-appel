@@ -79,6 +79,24 @@ for f in "$INTRO" "$OUTRO" "$POCHETTE" "$AMBIANCE" "$MUSIQUE"; do
   [ -n "$f" ] && [ ! -f "$f" ] && { echo "erreur : fichier introuvable : $f" >&2; exit 1; }
 done
 
+# Un fichier illisible doit arrêter le montage ici, avec un message clair,
+# plutôt que de faire échouer une étape sur trois et laisser ffmpeg se plaindre
+# en cascade d'un intermédiaire qui n'a jamais été écrit.
+verifier_media() {   # $1=fichier  $2=rôle  $3=audio|image
+  local flux sel
+  # ffprobe attend « a » ou « v » : une image est un flux vidéo d'une image.
+  sel=a; [ "$3" = "image" ] && sel=v
+  # « || true » est indispensable : avec set -e et pipefail, l'échec de ffprobe
+  # tuerait le script ici, avant même d'arriver au message d'erreur.
+  flux="$(ffprobe -v error -select_streams "$sel" \
+          -show_entries stream=codec_type -of csv=p=0 "$1" 2>/dev/null | head -1 || true)"
+  if [ -z "$flux" ]; then
+    echo "erreur : $2 ne contient pas de flux $3 lisible :" >&2
+    echo "         $1" >&2
+    exit 1
+  fi
+}
+
 RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -z "$SORTIE" ]; then
   base="${TITRE:-$(basename "${PRISES[0]}" | sed 's/\.[^.]*$//')}"
@@ -89,6 +107,13 @@ if [ -z "$SORTIE" ]; then
   SORTIE="$RACINE/sorties/$base.mp3"
 fi
 mkdir -p "$(dirname "$SORTIE")"
+
+for p in "${PRISES[@]}"; do verifier_media "$p" "une prise" audio; done
+[ -n "$INTRO" ] && verifier_media "$INTRO" "le générique d'ouverture" audio
+[ -n "$OUTRO" ] && verifier_media "$OUTRO" "le générique de fin" audio
+[ -n "$AMBIANCE" ] && verifier_media "$AMBIANCE" "le fond de salle" audio
+[ -n "$MUSIQUE" ] && verifier_media "$MUSIQUE" "la musique" audio
+[ -n "$POCHETTE" ] && verifier_media "$POCHETTE" "la pochette" image
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/arcanes-master.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -148,7 +173,17 @@ COURANT="$TMP/repare.wav"
 if [ -n "$COUPE_SILENCES" ]; then
   REF="$(duree_exacte "$TMP/repare.wav")"
   RETENU=""; OTE=""; PART=""
-  for seuil in ${SEUIL_SILENCE:- -48 -45 -42 -39 -36 -33 -30}; do
+  # Les seuils à essayer partent du plancher de bruit réel. Une liste fixe
+  # commençant à −48 dB est bien trop haute pour une prise propre : le premier
+  # essai mord déjà sur la parole et la coupe est abandonnée à tort.
+  if [ -n "$SEUIL_SILENCE" ]; then
+    SEUILS="$SEUIL_SILENCE"
+  else
+    SEUILS="$(awk -v p="$PL_NET" 'BEGIN{
+      d = p + 8; if (d < -66) d = -66; if (d > -45) d = -45;
+      for (s = d; s <= -28; s += 3) printf "%.0f ", s }')"
+  fi
+  for seuil in $SEUILS; do
     run -i "$TMP/repare.wav" \
         -af "silenceremove=stop_periods=-1:stop_duration=${PAUSE}:stop_threshold=${seuil}dB:detection=rms" \
         -ar 48000 -ac "$CANAUX" -c:a pcm_s24le "$TMP/coupe.wav"
@@ -203,11 +238,13 @@ if [ -n "$AMBIANCE" ] || [ -n "$MUSIQUE" ]; then
   COUCHES=()
   if [ -n "$AMBIANCE" ]; then
     g="$(couche "$AMBIANCE" "$AMBIANCE_ECART" "$TMP/fond_amb.wav")"
+    [ -s "$TMP/fond_amb.wav" ] || { echo "erreur : le fond de salle n'a pas pu être préparé." >&2; exit 1; }
     COUCHES+=("$TMP/fond_amb.wav")
     echo "        ambiance : $(basename "$AMBIANCE"), ${AMBIANCE_ECART} dB sous la voix (gain ${g} dB)"
   fi
   if [ -n "$MUSIQUE" ]; then
     g="$(couche "$MUSIQUE" "$MUSIQUE_ECART" "$TMP/fond_mus.wav")"
+    [ -s "$TMP/fond_mus.wav" ] || { echo "erreur : la musique n'a pas pu être préparée." >&2; exit 1; }
     COUCHES+=("$TMP/fond_mus.wav")
     echo "        musique  : $(basename "$MUSIQUE"), ${MUSIQUE_ECART} dB sous la voix (gain ${g} dB)"
   fi
