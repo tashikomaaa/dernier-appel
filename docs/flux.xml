@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+     xmlns:content="http://purl.org/rss/1.0/modules/content/"
+     xmlns:atom="http://www.w3.org/2005/Atom"
+     xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel>
+    <title>Dernier Appel</title>
+    <description><![CDATA[<p>Des histoires vraies qu&#x27;on raconte à voix basse, au comptoir, quand la salle s&#x27;est vidée. Espionnage, disparitions, objets dans le ciel, affaires qu&#x27;on n&#x27;a jamais refermées.</p><p>Un épisode toutes les deux semaines, seize minutes. On y distingue ce qui est établi, ce qui est débattu, et ce qui n&#x27;est qu&#x27;une légende — et on dit lequel est lequel.</p>]]></description>
+    <link>https://tashikomaaa.github.io/dernier-appel/</link>
+    <language>fr</language>
+    <atom:link href="https://tashikomaaa.github.io/dernier-appel/flux.xml" rel="self" type="application/rss+xml"/>
+    <lastBuildDate>Wed, 14 Oct 2026 10:57:40 +0200</lastBuildDate>
+    <generator>arcanes/flux</generator>
+    <itunes:author>Corvus</itunes:author>
+    <itunes:owner>
+      <itunes:name>Corvus</itunes:name>
+      <itunes:email>dernier_appel@aldwin.fr</itunes:email>
+    </itunes:owner>
+    <itunes:image href="https://tashikomaaa.github.io/dernier-appel/pochette.jpg"/>
+    <itunes:explicit>false</itunes:explicit>
+    <itunes:type>episodic</itunes:type>
+    <podcast:guid>c4d99433-36cd-5eab-9a4a-b4618c35a512</podcast:guid>
+    <itunes:subtitle>histoires étranges</itunes:subtitle>
+    <copyright>© 2026 Dernier Appel</copyright>
+    <podcast:locked owner="dernier_appel@aldwin.fr">yes</podcast:locked>
+    <itunes:category text="History"/>
+    <itunes:category text="Society &amp; Culture">
+      <itunes:category text="Documentary"/>
+    </itunes:category>
+    <itunes:category text="True Crime"/>
+    <item>
+      <title>Bande-annonce</title>
+      <description><![CDATA[<p>Des histoires vraies qu&#x27;on raconte à voix basse, au comptoir, quand la salle s&#x27;est vidée. Espionnage, disparitions, objets dans le ciel, affaires qu&#x27;on n&#x27;a jamais refermées.</p><p>À chaque fois, trois choses séparées et nommées comme telles : ce qui est établi, ce qui est débattu, et ce qui n&#x27;est qu&#x27;une légende. Quand les sources s&#x27;arrêtent, on le dit.</p><p>Seize minutes, un jeudi sur deux.</p><p>Music: Signs To Nowhere by Shane Ivers - https://www.silvermansound.com</p>]]></description>
+      <itunes:summary><![CDATA[<p>Des histoires vraies qu&#x27;on raconte à voix basse, au comptoir, quand la salle s&#x27;est vidée. Espionnage, disparitions, objets dans le ciel, affaires qu&#x27;on n&#x27;a jamais refermées.</p><p>À chaque fois, trois choses séparées et nommées comme telles : ce qui est établi, ce qui est débattu, et ce qui n&#x27;est qu&#x27;une légende. Quand les sources s&#x27;arrêtent, on le dit.</p><p>Seize minutes, un jeudi sur deux.</p><p>Music: Signs To Nowhere by Shane Ivers - https://www.silvermansound.com</p>]]></itunes:summary>
+      <enclosure url="https://tashikomaaa.github.io/dernier-appel/audio/000-bande-annonce.mp3" length="1623196" type="audio/mpeg"/>
+      <guid isPermaLink="false">8e7455fe-9664-5f87-8807-7e049cf6cd6b</guid>
+      <pubDate>Wed, 14 Oct 2026 06:00:00 +0200</pubDate>
+      <itunes:duration>00:01:26</itunes:duration>
+      <itunes:episode>0</itunes:episode>
+      <itunes:episodeType>trailer</itunes:episodeType>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:season>1</itunes:season>
+    </item>
+  </channel>
+</rss>
